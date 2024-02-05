@@ -1,4 +1,7 @@
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+import re
+import subprocess
+
 import requests
 
 """""""""""""""""""""""""""""""""THE PROTOCOL FOR THE PACKETS"""""""""""""""""""""""
@@ -12,7 +15,8 @@ import requests
 "packet_on_the_way: [id]?[ttl]?[data] main client to client Node and client Node to Client Node"
 "packet_on__the_way_back: [id]?[data] client Node to Client Node and client Node to main client "
 "new_ipv6_server: [ipv6] new ipv6 server to all other ipv6 servers that he has"
-"keys_for_security: [public_rsa],[public_dh] everyone to anyone "
+"keys_for_security: [public_rsa] everyone to anyone "
+"sigh_message: [signed_public_key]"
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 import traceback
@@ -28,7 +32,7 @@ from collections import deque
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import dh, rsa
-from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15
+from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15, MGF1
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
 
 THE_PACKET_GOT_BACK = None
@@ -40,7 +44,7 @@ MY_DATA_FOR_BOTS = {}
 # data base with json like mac: and what server they are connected to( his ipv6)
 Port_for_bot = None
 PORT_OF_UDP_SERVER = None
-IPV4_OF_SERVER = '192.168.2.135'
+IPV4_OF_SERVER = '172.20.10.2'
 IPV6_OF_SERVER = '2a06:c701:4550:a00:fad4:e6f3:25c7:8b68'
 Tor_opening_packets = 'Tor\r\n'
 Packet_to_internet = None
@@ -48,8 +52,9 @@ executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_')
 PACKETS_TO_HANDLE_QUEUE = deque()
 Alice_dh_private_key, Alice_dh_public_key = None, None
 Alice_rsa_private_key, Alice_rsa_public_key = None, None
-# ipv6: (public_rsa,public_dh)
-SERVER_FOR_KEYS = {}
+Alice_signature = None
+# ipv4_public, ipv4_private_static, port_tcp, port udp
+DATA_OF_SERVERS = [('147.235.215.64', '10.0.0.11', 56789, 56779), ('188.120.157.25', '192.168.175.229', 56789, 56779), ('2.52.14.104', '172.20.10.2', 56789, 56779)]
 
 
 # security
@@ -91,13 +96,19 @@ def generate_rsa_key_pair():
     return private_key, public_key
 
 
-def sign_message(message, private_key):
-    signature = private_key.sign(
-        message,
-        PKCS1v15(),
-        hashes.SHA256()
+def sign_message(message, public_key):
+    alice_signature = public_key.encrypt(
+        message.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ),
+        OAEP(
+            mgf=MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
     )
-    return signature
+    return alice_signature
 
 
 def verify_signature(message, signature, public_key):
@@ -124,9 +135,9 @@ def sending_the_keys_for_security(packet_to_send):
     global Tor_opening_packets, Alice_dh_public_key, Alice_rsa_public_key
     rsa_public_to_send = serialize_public_key(Alice_rsa_public_key)
     rsa_public_to_send = rsa_public_to_send.decode('utf-8')
-    dh_public_to_send = serialize_public_key(Alice_dh_public_key)
-    dh_public_to_send = dh_public_to_send.decode('utf-8')
-    packet_to_send += f"keys_for_security: {rsa_public_to_send},{dh_public_to_send}"
+    # dh_public_to_send = serialize_public_key(Alice_dh_public_key)
+    # dh_public_to_send = dh_public_to_send.decode('utf-8')
+    packet_to_send += f"keys_for_security: {rsa_public_to_send}"
     return packet_to_send
 
 
@@ -150,12 +161,12 @@ def verify_packets_from_server(client_socket_tcp, client_socket_udp):
         while True:
             if len(PACKETS_TO_HANDLE_QUEUE) < 1:
                 continue
-            #print(len(PACKETS_TO_HANDLE_QUEUE))
-            #print('passed')
+            # print(len(PACKETS_TO_HANDLE_QUEUE))
+            # print('passed')
             payload = PACKETS_TO_HANDLE_QUEUE.popleft()
             if tor_filter(payload):
                 data_from_packet = payload.decode('utf-8')
-                #print(data_from_packet)
+                # print(data_from_packet)
                 handle_packets_from_server(data_from_packet, client_socket_tcp, client_socket_udp)
     except Exception as e:
         traceback.print_exc()
@@ -228,10 +239,6 @@ def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp):
         print(e)
 
 
-def making_the_secret_key(rsa_public_key, dh_public_key):
-    pass
-
-
 def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp):
     """
     handling the data in the packets
@@ -241,7 +248,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp)
     :param client_socket_udp:
     :return:
     """
-    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER
+    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key
     replay_tor = Tor_opening_packets
     try:
         lines = raw_packet.split('\r\n')
@@ -262,9 +269,9 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp)
             if line_parts[0] == 'server_answer_for_first_stage_udp_hole_punching:':
                 l_parts = line_parts[1].split('?')
                 if l_parts[0] == 'yes':
-                    #print(l_parts[1])
+                    # print(l_parts[1])
                     another = tuple(l_parts[1][1:-1].split(','))
-                    #print(another)
+                    # print(another)
                     ipv4_for_punch_hole = another[0]
                     port_for_punch_hole = int(another[1])
                     # opening a thread for udp punch_hole
@@ -281,11 +288,19 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp)
             # -------------
             # [public_rsa],[public_dh]
             if line_parts[0] == 'keys_for_security:':
-                l_parts = line_parts[1].split('?')
                 # in l_parts[1] you have the data to show to the user
                 l_parts = line.split(': ')
-                l_parts2 = l_parts[1].split(',')
-                making_the_secret_key(deserialize_public_key(l_parts2[0]), deserialize_public_key(l_parts2[1]))
+                signed_dh = sign_message(Alice_dh_public_key, deserialize_public_key(l_parts[1]))
+                replay_tor += f"sigh_message: {signed_dh.decode('utf-8')}"
+                client_socket_tcp.send(replay_tor.incode('utf-8'))
+            # -------------
+
+            # -------------
+            # [public_rsa],[public_dh]
+            if line_parts[0] == 'sigh_message:':
+                l_parts = line.split(': ')
+                sign_dh = deserialize_public_key(l_parts[1])
+                print(f' the sign_dh from server: {sign_dh}')
             # -------------
 
             # -------------
@@ -318,6 +333,72 @@ def select_ipv6_server():
     return None
 
 
+def get_subnet_mask():
+    try:
+        # Run the ipconfig command and capture the output
+        result = subprocess.run(['ipconfig'], capture_output=True, text=True, encoding='utf-8', errors='replace')
+
+        # Print the entire ipconfig output for debugging
+        # print(result.stdout)
+
+        # Use regular expression to find the subnet mask in the output
+        match = re.search(
+            r"(Wi-Fi|Ethernet).*IPv4 Address.*:\s+(\d+\.\d+\.\d+\.\d+).*Subnet Mask.*:\s+(\d+\.\d+\.\d+\.\d+)",
+            result.stdout, re.DOTALL)
+        if match:
+            interface_name = match.group(1)
+            ipv4_address = match.group(2)
+            subnet_mask = match.group(3)
+
+            return subnet_mask
+        else:
+            print("Error: IPv4 address and subnet mask not found in the ipconfig output.")
+            return None
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+
+def are_in_same_network(ip1, ip2, subnet_mask):
+    ip1_parts = list(map(int, ip1.split('.')))
+    ip2_parts = list(map(int, ip2.split('.')))
+    subnet_mask_parts = list(map(int, subnet_mask.split('.')))
+
+    # Perform bitwise AND operation for each octet
+    network1 = [ip & mask for ip, mask in zip(ip1_parts, subnet_mask_parts)]
+    network2 = [ip & mask for ip, mask in zip(ip2_parts, subnet_mask_parts)]
+
+    # Check if the networks are the same
+    return network1 == network2
+
+
+def select_ipv4_server(servers_list):
+    """
+    selecting ipv4 from the list of servers and i will check if the server is in the same router as me
+    if yes, i will do connect to his private ipv4 and if not so to the public one
+    :return:
+    """
+    # ipv4_public, ipv4_private_static, port_tcp, port udp
+    global IPV4_OF_SERVER
+    try:
+        number_of_servers = len(servers_list)
+        number_of_servers -= 1
+        random_server = random.randint(0, number_of_servers)
+        data_of_server = servers_list[random_server]
+        if are_in_same_network(str(get_ipv4_address_private()), data_of_server[1], str(get_subnet_mask())):
+            # the server and client are in the same network
+            IPV4_OF_SERVER = data_of_server[1]
+        else:
+            # not in the same network
+            IPV4_OF_SERVER = data_of_server[0]
+
+        return random_server
+    except Exception as e:
+        print(e)
+        traceback.print_exc()
+
+
 def setting_client_socket_for_server_ipv6_or_ipv4():
     """
     checking what server the client can connect to
@@ -325,7 +406,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     """
     # here he will open the json file and will pick up randomly a computer for ipv6
     # when i will have the db i will change the for
-    global IPV4_OF_SERVER, IPV6_OF_SERVER
+    global IPV4_OF_SERVER, IPV6_OF_SERVER, DATA_OF_SERVERS
     for i in range(1, 2):
         try:
             ipv6 = select_ipv6_server()
@@ -338,8 +419,21 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     print('there is no available ipv6 for you so i am trying to do it with ipv4')
     # do here the ipv4 select
     client_socket = socket(AF_INET, SOCK_STREAM)
-    client_socket.connect((IPV4_OF_SERVER, 56789))
-    print(f"connected to : {IPV4_OF_SERVER}")
+    avilable_serves = DATA_OF_SERVERS
+    a = 0
+    for i in range(0, len(DATA_OF_SERVERS)):
+        try:
+            index_if_not_working = select_ipv4_server(avilable_serves)
+            client_socket.connect((IPV4_OF_SERVER, 56789))
+            a = 1
+        except Exception as e:
+            print(e)
+            print('server is not available. trying another one.')
+            del avilable_serves[index_if_not_working]
+    if a == 0:
+        print('there is no available server right now, please try later')
+    else:
+        print(f"connected to : {IPV4_OF_SERVER}")
     return client_socket
 
 
@@ -352,7 +446,7 @@ def setting_client_socket_for_bots():
         # do bind !!!!!!!!!!!!!!!
         # client_udp_socket.bind((get_ipv4_address(), Port_for_bot))
         while a == 0:
-            #print('69')
+            # print('69')
             try:
                 client_udp_socket.bind(('0.0.0.0', Port_for_bot))
                 a = 1
@@ -442,7 +536,7 @@ def check_user_info(client_socket_udp, client_socket_tcp):
         client_socket_udp.sendto(first_packet.encode('utf-8'), (IPV4_OF_SERVER, PORT_OF_UDP_SERVER))
         # response_from_server = client_socket_tcp.recv(1024)
         # PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
-        #print('got here')
+        # print('got here')
     except Exception as e:
         print(f' got it here {e}')
 
@@ -493,7 +587,7 @@ def notify_mac_to_server(client_socket_tcp):
         # packet_to_send += f'new_client_to_server: {mac_address},{get_public_ip()},{Port_for_bot}\r\n'
         packet_to_send += f'new_client_to_server: {mac_address},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot}\r\n'
         packet_to_send = sending_the_keys_for_security(packet_to_send)
-        #print(f" how keys look : {packet_to_send.encode('utf-8')}")
+        # print(f" how keys look : {packet_to_send.encode('utf-8')}")
         client_socket_tcp.send(packet_to_send.encode('utf-8'))
         data = client_socket_tcp.recv(1024)
         if tor_filter(data):
@@ -510,6 +604,7 @@ def main():
         # making keys
         Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
         Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
+        # Alice signs her DH public key
         print('did keys')
 
         # waits_for_server_approve = client_socket_tcp.recv(1024)
@@ -517,20 +612,20 @@ def main():
         # notifying the server about my mac
         select_random_port()
         notify_mac_to_server(client_socket_tcp)
-        #print('1')
+        # print('1')
         # here getting the keys from the server
         # data = client_socket_tcp.recv(1024)
         # handling_keys_from_server(data)
         client_socket_udp = setting_client_socket_for_bots()
-        #print('2')
+        # print('2')
         # calling the function who checks if the user typed something
         executor.submit(check_user_info, client_socket_udp, client_socket_tcp)
-        #print('3')
+        # print('3')
         # a thread for handling the packets
         executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
         while True:
             response_from_server = client_socket_tcp.recv(1024)
-            #print(response_from_server)
+            # print(response_from_server)
             # add the packets to queue
             PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
     except Exception as e:
