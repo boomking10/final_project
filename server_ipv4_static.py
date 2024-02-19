@@ -16,7 +16,8 @@ import requests
 "packet_on__the_way_back: [id]?[data] client Node to Client Node and client Node to main client "
 "new_ipv6_server: [ipv6] new ipv6 server to all other ipv6 servers that he has"
 "keys_for_security: [public_rsa] everyone to anyone "
-"sigh_message: [signed_public_key]"
+"sigh_message: goren[signed_public_key]amit[iv] the part with the iv happens only when the clients send to the server"
+"sigh_message_for_computer: [signed_public_key]amit[iv] server to clients"
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 import traceback
@@ -28,11 +29,12 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from collections import deque
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives import serialization, hashes, padding
 from cryptography.hazmat.primitives.asymmetric import dh, rsa
 from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15, MGF1
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
-
+import os
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES, PKCS1_OAEP
@@ -48,7 +50,7 @@ from Crypto.Protocol.KDF import scrypt
 Tor_opening_packets = 'Tor\r\n'
 # creating json file with my information there. this lines will be only in my code because
 # when first they install the exe they will need to know where to send first
-# mac: tuple(str_ipv4, int_port), client_socket, (public_rsa, public_dh)
+# mac: tuple(str_ipv4, int_port), client_socket, [public_rsa, public_dh, shared_key_with_him:(encryptor, decryptor, padder, unpadder), bob iv]
 MY_DATA_FOR_BOTS = {}
 # put here the port
 PORT_FOR_UDP = 56779
@@ -56,6 +58,8 @@ executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_')
 Alice_dh_private_key, Alice_dh_public_key = None, None
 Alice_rsa_private_key, Alice_rsa_public_key = None, None
 Alice_signature = None
+Padder = padding.PKCS7(128).padder()
+Unpadder = padding.PKCS7(128).unpadder()
 
 
 # # Use forward slashes or a raw string for the file path
@@ -68,19 +72,17 @@ Alice_signature = None
 
 # security
 ###################################################################################################
-def make_dh_keypair():
-    p = 877
-    q = 1531
-    g = 131
-    x = random.randint(1, q)
-    y = pow(g, x, p)
-    pub = DSA.construct((pow(g, y, p), p, q, g))
-    priv = DSA.construct((y, p, q, g))
-    return pub, priv
-
 
 def generate_dh_key_pair():
-    parameters = dh.generate_parameters(generator=2, key_size=1024, backend=default_backend())
+    """
+    generating dh key pair with statics params 1024 bits
+    :return:
+    """
+    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    g = 2
+
+    params_numbers = dh.DHParameterNumbers(p, g)
+    parameters = params_numbers.parameters(default_backend())
     private_key = parameters.generate_private_key()
     public_key = private_key.public_key()
 
@@ -88,6 +90,11 @@ def generate_dh_key_pair():
 
 
 def serialize_public_key(public_key):
+    """
+    transferring the key to a form that i can send in packet
+    :param public_key:
+    :return:
+    """
     serialized_key = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -96,20 +103,24 @@ def serialize_public_key(public_key):
 
 
 def deserialize_public_key(serialized_key):
+    """
+    transferring the key to his object
+    :param serialized_key:
+    :return:
+    """
     serialized_key = serialized_key.encode('utf-8')
     public_key = serialization.load_pem_public_key(serialized_key, backend=default_backend())
     return public_key
 
 
-def derive_shared_secret(private_key, peer_public_key):
-    shared_secret = private_key.exchange(peer_public_key)
-    return shared_secret
-
-
 def generate_rsa_key_pair():
+    """
+    generating rsa key pair
+    :return:
+    """
     private_key = rsa.generate_private_key(
         public_exponent=65537,
-        key_size=1024,
+        key_size=4096,
         backend=default_backend()
     )
     public_key = private_key.public_key()
@@ -117,15 +128,13 @@ def generate_rsa_key_pair():
 
 
 def sign_message(message, public_key):
-    print(public_key)
+    """
+    encrypting the packet with public rsa so only the person who has the private rsa can see my public dh
+    :param message:
+    :param public_key:
+    :return:
+    """
     message = serialize_public_key(message)
-    #message_64 = base64.b64encode(message).decode('utf-8')
-    # message = message.public_bytes(
-    #     encoding=serialization.Encoding.PEM,
-    #     format=serialization.PublicFormat.SubjectPublicKeyInfo
-    # )
-    message = message.replace(b'-----BEGIN PUBLIC KEY-----\n', b'').replace(b'-----END PUBLIC KEY-----\n', b'')
-    print(message)
     alice_signature = public_key.encrypt(
         message,
         OAEP(
@@ -134,21 +143,54 @@ def sign_message(message, public_key):
             label=None
         )
     )
+    # alice_signature = alice_signature.decode('utf-8')
+    # print(f' before turning to string: {alice_signature} and len{len(alice_signature)}')
+    # alice_signature1 = str(alice_signature)
+    # # alice_signature1 = alice_signature1[2:-1]
+    # # print(alice_signature1)
+    # # alice_signature1 = alice_signature1.encode('utf-8')
+    # print(f' after turning to string: {alice_signature1}')
+    # print(f'len of cypghtext after turning: {len(alice_signature1)}')
     return alice_signature
 
 
-def verify_signature(message, signature, public_key):
-    try:
-        public_key.verify(
-            signature,
-            message,
-            PKCS1v15(),
-            hashes.SHA256()
-        )
-        return True
-    except Exception as e:
-        print(f"Signature verification failed: {e}")
-        return False
+def encrypt(plaintext, mac):
+    """
+    encrypting the packet
+    :param plaintext:
+    :param mac:
+    :return:
+    """
+    global MY_DATA_FOR_BOTS
+    # mac: tuple(str_ipv4, int_port), client_socket, [public_rsa, public_dh, shared_key_with_him:(encryptor, decryptor, padder, unpadder)]
+    # (encryptor, decryptor, padder, unpadder)
+    cipher = MY_DATA_FOR_BOTS[mac][2][2]
+    encryptor = cipher.encryptor()
+    padder = padding.PKCS7(128).padder()
+    padded_plaintext = padder.update(plaintext) + padder.finalize()
+    # print(f' padder block size: {MY_DATA_FOR_BOTS[mac][2][2][2].block_size}')
+    ciphertext = encryptor.update(padded_plaintext) + encryptor.finalize()
+    return ciphertext
+
+
+def decrypt(ciphertext, mac):
+    """
+    decrypting the packet
+    :param ciphertext:
+    :param mac:
+    :return:
+    """
+    global MY_DATA_FOR_BOTS
+    cipher = MY_DATA_FOR_BOTS[mac][2][2]
+    decryptor = cipher.decryptor()
+    unpadder = padding.PKCS7(128).unpadder()
+    # (encryptor, decryptor, padder, unpadder)
+    decrypted_padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+    # Unpad the decrypted plaintext
+    # print(f' the cipher text before unpadding: {decrypted_padded_plaintext}')
+    plaintext = unpadder.update(decrypted_padded_plaintext) + unpadder.finalize()
+    return plaintext
 
 
 #########################################################################################
@@ -163,8 +205,12 @@ def sending_the_keys_for_security(packet_to_send, public_rsa_of_bob):
     rsa_public_to_send = rsa_public_to_send.decode('utf-8')
     # dh_public_to_send = serialize_public_key(Alice_dh_public_key)
     # dh_public_to_send = dh_public_to_send.decode('utf-8')
-    packet_to_send += f"keys_for_security: {rsa_public_to_send}\r\nsigh_message: {(sign_message(Alice_dh_public_key, public_rsa_of_bob)).decode('utf-8')}"
-    return packet_to_send
+    # print(f' bob rsa public: {public_rsa_of_bob}')
+    signed_public_key = sign_message(Alice_dh_public_key, public_rsa_of_bob)
+    # print(signed_public_key)
+    # signed_public_key = signed_public_key.decode('utf-8')
+    packet_to_send += f"keys_for_security: {rsa_public_to_send}\r\nsigh_message: goren"
+    return packet_to_send, signed_public_key
 
 
 def get_subnet_mask():
@@ -195,6 +241,12 @@ def get_subnet_mask():
 
 
 def are_in_same_network(ip1, ip2, subnet_mask):
+    """
+    :param ip1:
+    :param ip2:
+    :param subnet_mask:
+    :return:
+    """
     ip1_parts = list(map(int, ip1.split('.')))
     ip2_parts = list(map(int, ip2.split('.')))
     subnet_mask_parts = list(map(int, subnet_mask.split('.')))
@@ -207,7 +259,7 @@ def are_in_same_network(ip1, ip2, subnet_mask):
     return network1 == network2
 
 
-def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, port, server_socket_udp):
+def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, port):
     global MY_DATA_FOR_BOTS
     try:
         packet_to_add = None
@@ -218,6 +270,7 @@ def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, po
                 packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({data_for_person[0]},{data_for_person[2]})'
             # if not
             else:
+                print(' not in the same network')
                 packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({ip},{port})'
         return packet_to_add
     except Exception as e:
@@ -239,10 +292,11 @@ def handle_first_stage_udp_hole_punching(mac_of_the_person2, ip, port):
         data_for_person = MY_DATA_FOR_BOTS[mac_of_the_person2][0]
         # if same internet
         if are_in_same_network(data_for_person[0], ip, str(get_subnet_mask())):
+            print('in the same network')
             packet_to_add = f'server_answer_for_first_stage_udp_hole_punching: yes?({data_for_person[0]},{data_for_person[2]})'
         # if not
         else:
-            print(f'the public ip of 2: {data_for_person[1]}. the public port 2: {port}')
+            print('not in the same network')
             packet_to_add = f'server_answer_for_first_stage_udp_hole_punching: yes?({ip},{port})'
         return packet_to_add
     except Exception as e:
@@ -253,7 +307,7 @@ def updating_data_base():
     pass
 
 
-def handle_packets_from_computers(raw_packet, client_socket, client_address, server_socket_udp):
+def handle_packets_from_computers(raw_packet, client_socket, client_address, server_socket_udp, payload, mac):
     """
     handeling all the packets coming to the server
     :param raw_packet:
@@ -262,8 +316,9 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
     :param server_socket_udp:
     :return:
     """
-    global executor, Tor_opening_packets, MY_DATA_FOR_BOTS, PORT_FOR_UDP
+    global executor, Tor_opening_packets, MY_DATA_FOR_BOTS, PORT_FOR_UDP, Alice_rsa_private_key, Alice_dh_private_key
     replay_tor = Tor_opening_packets
+    mac_of_the_person_who_sent_the_packet = None
     try:
         lines = raw_packet.split('\r\n')
         while '' in lines:
@@ -276,13 +331,14 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
             if line_parts[0] == 'new_client_to_server:':
                 l_parts = line_parts[1].split(',')
                 mac_of_bot = l_parts[0]
-                # (private ip, public ip, port number private, port number public), client socket
+                # (private ip, public ip, port number private), client socket
                 MY_DATA_FOR_BOTS[l_parts[0]] = [(l_parts[1], l_parts[2], l_parts[3]), client_socket]
                 # add this client mac in line_parts[1] to your data base and with his address
                 # sending the client the port for udp
-                replay_tor += f'port_of_server: {PORT_FOR_UDP}'
+                replay_tor += f'port_of_server: {PORT_FOR_UDP}\r\n'
                 # print(f'replay_tor)
-                client_socket.send(replay_tor.encode('utf-8'))
+                replay_tor = replay_tor.encode('utf-8')
+                # client_socket.send(replay_tor.encode('utf-8'))
                 updating_data_base()
                 pass
             # -------------
@@ -301,14 +357,20 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 print(f'the public ip of 1: {public_ip_of_1}. the public port 1: {public_port_of_1}')
                 # updating the dictionary of the bot
                 replay_tor2 += server_notify_bot_for_second_stage_of_udp_hole_punching(l_parts[0], public_ip_of_1,
-                                                                                       public_port_of_1,
-                                                                                       server_socket_udp)
+                                                                                       public_port_of_1)
+                replay_tor2 += '\r\nsigh_message_for_computer: goren'
+
                 if l_parts[1] in MY_DATA_FOR_BOTS:
                     print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
-                    MY_DATA_FOR_BOTS[l_parts[1]][1].send(replay_tor2.encode('utf-8'))
+                    add_sign = replay_tor2.encode('utf-8') + serialize_public_key(
+                        MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[0]][2][
+                                   3]
+                    ciphertext = encrypt(add_sign, l_parts[1])
+                    MY_DATA_FOR_BOTS[l_parts[1]][1].send(ciphertext)
                 else:
                     replay_tor += f'server_answer_for_first_stage_udp_hole_punching: no'
-                    MY_DATA_FOR_BOTS[l_parts[0]][1].send(replay_tor.encode('utf-8'))
+                    ciphertext = encrypt(replay_tor.encode('utf-8'), l_parts[1])
+                    MY_DATA_FOR_BOTS[l_parts[0]][1].send(ciphertext)
             # -------------
 
             # -------------
@@ -317,9 +379,13 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 l_parts = line_parts[1].split(',')
                 replay_tor += handle_first_stage_udp_hole_punching(l_parts[0], client_address[0], client_address[1])
                 # sending to the client i got the packet from
-                print(f' what i am sending to the first bot in punch hole: {replay_tor}')
                 client_socket = MY_DATA_FOR_BOTS[l_parts[1]][1]
-                client_socket.send(replay_tor.encode('utf-8'))
+                replay_tor += '\r\nsigh_message_for_computer: goren'
+                send_key = replay_tor.encode('utf-8') + serialize_public_key(
+                    MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[1]][2][3]
+                print(f' what i am sending to the first bot in punch hole: {replay_tor}')
+                ciphertext = encrypt(send_key, l_parts[1])
+                client_socket.send(ciphertext)
                 print('finished sending each of the bots data')
 
             # -------------
@@ -328,21 +394,56 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
             if line_parts[0] == 'keys_for_security:':
                 l_parts = line.split(': ')
                 MY_DATA_FOR_BOTS[mac_of_bot].append(
-                    [deserialize_public_key(l_parts[1]), None])
+                    [deserialize_public_key(l_parts[1]), None, None, None])
                 # print(f' the data of the bot: {MY_DATA_FOR_BOTS[mac_of_bot]}')
-                packet_to_send = Tor_opening_packets
+                # packet_to_send = ''
                 # sending the clients the server public keys
                 # print(f'the public rsa of bob: {deserialize_public_key(l_parts[1])}')
                 # print(type(deserialize_public_key(l_parts[1])))
-                packet_to_send = sending_the_keys_for_security(packet_to_send, deserialize_public_key(l_parts[1]))
-                client_socket.send(packet_to_send.encode('utf-8'))
+                print(print(f' the public key: {l_parts[1]}'))
+                packet_to_send, encrypted_key = sending_the_keys_for_security('',
+                                                                              deserialize_public_key(l_parts[1]))
+                # Generate a random IV (Initialization Vector)
+                # iv = os.urandom(16)  # 16 bytes IV for AES
+                replay_tor += packet_to_send.encode('utf-8') + encrypted_key
+                print(f"the packet i am sending with sign: {replay_tor}")
+                client_socket.send(replay_tor)
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'mac_of_the_person_who_sent_the_packet:':
+                mac_of_the_person_who_sent_the_packet = line_parts[1]
             # -------------
 
             # -------------
             if line_parts[0] == 'sigh_message:':
-                l_parts = line.split(': ')
-                sign_dh = deserialize_public_key(l_parts[1])
-                print(f' the sign_dh from server: {sign_dh}')
+                l_parts = payload.split(b'goren')
+                bob_signature_and_iv = l_parts[1].split(b'amit')
+                bob_signature = bob_signature_and_iv[0]
+                bob_iv = bob_signature_and_iv[1]
+                print(f' length of the cyphtext: {len(bob_signature)} and the iv{bob_iv}')
+                decrypted_bob_dh_public_key = Alice_rsa_private_key.decrypt(
+                    bob_signature,
+                    OAEP(
+                        mgf=MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                )
+                MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][1] = serialization.load_pem_public_key(
+                    decrypted_bob_dh_public_key, backend=default_backend())
+                MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2] = Alice_dh_private_key.exchange(
+                    MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][1])
+                # Create a Cipher object
+                # too long
+                MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2] = \
+                    MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2][:32]
+                cipher = Cipher(algorithms.AES(MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2]),
+                                modes.CBC(bob_iv),
+                                backend=default_backend())
+                MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2] = cipher
+                MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][3] = bob_iv
+                print(f' shared from server: {MY_DATA_FOR_BOTS[mac_of_the_person_who_sent_the_packet][2][2]}')
 
     except Exception as e:
         traceback.print_exc()
@@ -404,23 +505,28 @@ def handle_packet_from_udp(server_socket_udp):
     recving packets in udp
     :return:
     """
+    global MY_DATA_FOR_BOTS
     while True:
         try:
-            data, client_address = server_socket_udp.recvfrom(1024)
-        except socket_timeout:  # !!
-            continue  # !!
-        # !!
-        except OSError as e:
-            print(f"Socket error occurred: {e}")
-
-        except ConnectionResetError as e:
-            print(f"Connection reset by peer: {e}")
+            data, client_address = server_socket_udp.recvfrom(2048)
+            # print(f' what i am recieving from clients: {data}')
+            for key, value in MY_DATA_FOR_BOTS.items():
+                if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
+                    # so the server and the bot are on the same network
+                    mac = key
+                    break
+                elif value[0][1] == client_address[0]:
+                    mac = key
+                    break
+            plaint_text = decrypt(data, mac)
+            if tor_filter(plaint_text):
+                data_from_packet = plaint_text.decode('utf-8')
+                handle_packets_from_computers(data_from_packet, None, client_address, server_socket_udp, plaint_text,
+                                              mac)
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
+            traceback.print_exc()
         # adds the payload to the queue to wait for being handled
-        if tor_filter(data):
-            data_from_packet = data.decode('utf-8')
-            handle_packets_from_computers(data_from_packet, None, client_address, server_socket_udp)
 
 
 def get_ipv4_address_private():
@@ -468,20 +574,40 @@ def new_clients(client_socket, client_address, server_socket_udp):
     :param server_socket_udp:
     :return:
     """
-    global executor
+    global executor, MY_DATA_FOR_BOTS
     # telling the client my port for udp
     # executor.submit(handle_packet_from_udp, server_socket_udp)
     # response = client_socket.recv(1024)
     # if tor_filter(response):
     #     data_from_packet = response.decode('utf-8')
     #     handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp)
-    while True:
-        incoming_packet = client_socket.recv(1024)
-        if tor_filter(incoming_packet):
-            # print('passed')
-            data_from_packet = incoming_packet.decode('utf-8')
-            # print(data_from_packet)
-            handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp)
+    try:
+        finished_exchanging_keys = 0
+        mac = None
+        while True:
+            incoming_packet = client_socket.recv(4096)
+            if finished_exchanging_keys < 2:
+                if tor_filter(incoming_packet):
+                    # print('passed')
+                    if b'goren' in incoming_packet:
+                        data1 = incoming_packet.split(b'goren')[0]
+                    else:
+                        data1 = incoming_packet
+                    data_from_packet = data1.decode('utf-8')
+                    finished_exchanging_keys += 1
+                    # print(data_from_packet)
+            else:
+                for key, value in MY_DATA_FOR_BOTS.items():
+                    if value[1] == client_socket:
+                        mac = key
+                        break
+                plaint_text = decrypt(incoming_packet, mac)
+                if tor_filter(plaint_text):
+                    data_from_packet = plaint_text.decode('utf-8')
+            handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp,
+                                          incoming_packet, mac)
+    except Exception as e:
+        traceback.print_exc()
 
 
 def main():
@@ -492,13 +618,12 @@ def main():
         print(f'your private ip: {get_ipv4_address_private()}')
         print(f'your public ip: {get_public_ip()}')
         # making keys
-        #Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
+        Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
         Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
-        Alice_dh_public_key, Alice_dh_private_key = make_dh_keypair()
-        #print(sign_message(Alice_dh_public_key, Alice_rsa_public_key))
-        alice_dh_public_bytes = Alice_dh_public_key.export_key()
-        #print(sign_message(alice_dh_public_bytes, Alice_rsa_public_key))
-        Alice_rsa_public_key = RSA.import_key(alice_dh_public_bytes)
+        # print(sign_message(Alice_dh_public_key, Alice_rsa_public_key))
+        # alice_dh_public_bytes = Alice_dh_public_key.export_key()
+        # print(sign_message(Alice_dh_public_key, Alice_rsa_public_key))
+        # Alice_rsa_public_key = RSA.import_key(alice_dh_public_bytes)
         # Alice signs her DH public key
         # print(serialize_dh_public_key(Alice_rsa_public_key))
         print('did keys')
