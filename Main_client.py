@@ -7,10 +7,10 @@ import requests
 
 """""""""""""""""""""""""""""""""THE PROTOCOL FOR THE PACKETS"""""""""""""""""""""""
 "Tor;""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""''""""""""''"""
-"new_client_to_server: [mac of the new client that connected to you],[his ipv4 private], [his ipv4 public], [his port number]  client Node and main to server and server to client Nodes"
+"new_client_to_server_main or _node: [mac of the new client that connected to you] if its node so without that,[his ipv4 private], [his ipv4 public], [his port number]  client Node and main to server and server to client Nodes"
 "port_of_server: [the port of the server in udp] server to everyone"
 "start_first_stage_udp_hole_punching: [mac_of_the person who sent the packet],[mac of the person you want to do udp punch_hole] client Node and main to server "
-"server_answer_for_first_stage_udp_hole_punching: if the server connect to the bot:[yes]?[(ipv4,port)] if not:[no] server to client Node and main "
+"server_answer_for_first_stage_udp_hole_punching: if the server connect to the bot:[yes]?[(ipv4,port)]?[mac_of_other_bot] if not:[no] server to client Node and main "
 "server_notify_bot_for_second_stage_of_udp_hole_punching: [mac of the person who wants to do udp punch]?[(ipv4,port)] server to client Node and main"
 "giving_data_of_2: [mac_of_the person who sent the packet],[mac of the person you want to do udp punch_hole]"
 "packet_on_the_way: [id]?[ttl]?[data] main client to client Node and client Node to Client Node"
@@ -40,10 +40,8 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key, l
 
 THE_PACKET_GOT_BACK = None
 DATA_FROM_UDP_HOLE_PUNCHING = None
-# dictionary of all the available bots i have mac: (ipv4,port)
+# dictionary of all the available bots i have mac: (cipher object)
 AVAILABLE_BOTS = {}
-# dictionary will be like mac:(ipv4,port), ipv6 of the server he is connected to
-MY_DATA_FOR_BOTS = {}
 # data base with json like mac: and what server they are connected to( his ipv6)
 Port_for_bot = None
 PORT_OF_UDP_SERVER = None
@@ -264,6 +262,7 @@ def keeping_the_udp_punch_hole_alive(ipv4_for_punch_hole, port_for_punch_hole, c
 def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher):
     """
     creating udp punch_hole and sending the packet to the internet and waiting for the packet to come back
+    :param cipher:
     :param ipv4_for_punch_hole:
     :param port_for_punch_hole:
     :param client_socket_udp:
@@ -274,9 +273,9 @@ def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, 
         i = 1
         print('starting the udp punch hole')
         # put here the real message you want to send
-        ciphertext = encrypt_bot(Packet_to_internet.encode('utf-8'), cipher)
+        #ciphertext = encrypt_bot(Packet_to_internet.encode('utf-8'), cipher)
         while DATA_FROM_UDP_HOLE_PUNCHING is None:
-            client_socket_udp.sendto(ciphertext, (ipv4_for_punch_hole, port_for_punch_hole))
+            client_socket_udp.sendto(Packet_to_internet, (ipv4_for_punch_hole, port_for_punch_hole))
             print(f'sent: {i} to {(ipv4_for_punch_hole, port_for_punch_hole)}')
             i += 1
             try:
@@ -322,24 +321,39 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
     :param client_socket_udp:
     :return:
     """
-    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server
+    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server, AVAILABLE_BOTS
     replay_tor = Tor_opening_packets
+    is_bytes = False
     try:
-        lines = raw_packet.split('\r\n')
-        while '' in lines:
-            lines.remove('')
+        if b'sigh_message_for_computer:' in payload:
+            lines = payload.split(b'\r\n')
+            is_bytes =True
+            while b'' in lines:
+                lines.remove(b'')
+        else:
+            lines = raw_packet.split('\r\n')
+            while '' in lines:
+                lines.remove('')
         print(f' the data of the packet: {lines}')
         for line in lines:
-            line_parts = line.split()
+            if is_bytes:
+                if b'sigh_message_for_compute' in line:
+                    line_parts = line.split(b'goren')
+                else:
+                    line_parts = line.split()
+            else:
+                line_parts = line.split()
             # new_client_to_server: [mac of the new client that connected to you] client Node and main to server and server to client Nodes
             # -------------
-            if line_parts[0] == 'new_client_to_server:':
-                # add this client mac to your data base
+            if line_parts[0] == b'new_client_to_server_node:':
+                # add this client mac to your dictionary
+                mac_of_new_client = line_parts[1].decode('utf-8')
+                AVAILABLE_BOTS[mac_of_new_client] = None
                 pass
             # -------------
 
             # -------------
-            # [yes],[(ipv4,port)] if not:[no] server to client Node and main
+            # [yes]?[(ipv4,port)] if not:[no] server to client Node and main
             if line_parts[0] == 'server_answer_for_first_stage_udp_hole_punching:':
                 l_parts = line_parts[1].split('?')
                 if l_parts[0] == 'yes':
@@ -348,6 +362,8 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                     # print(another)
                     ipv4_for_punch_hole = another[0]
                     port_for_punch_hole = int(another[1])
+                    cipher = AVAILABLE_BOTS[l_parts[2]]
+                    executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
             # -------------
 
             # -------------
@@ -403,17 +419,19 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
 
             # -------------
             # [public_rsa],[public_dh]
-            if line_parts[0] == 'sigh_message_for_computer:':
-                l_parts = payload.split(b'goren')
-                bob_public_dh_and_iv = l_parts[1].split(b'amit')
+            if line_parts[0] == b'sigh_message_for_computer: ':
+                bob_public_dh_and_iv = line_parts[1].split(b'amit')
                 bob_public_dh = bob_public_dh_and_iv[0]
                 bob_iv = bob_public_dh_and_iv[1]
+                print(f'bob iv len: {len(bob_iv)}')
                 shared_secret = Alice_dh_private_key.exchange(serialization.load_pem_public_key(bob_public_dh, backend=default_backend()))[:32]
                 cipher = Cipher(algorithms.AES(shared_secret),
                                 modes.CBC(bob_iv),
                                 backend=default_backend())
                 # opening a thread for udp punch_hole
-                executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
+                AVAILABLE_BOTS[mac_of_new_client] = cipher
+                #executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
+                print(f'new client connected to server: {AVAILABLE_BOTS}')
             # -------------
 
             # -------------
@@ -428,7 +446,8 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                 # check from the dictionary where to send the packet
     except Exception as e:
         traceback.print_exc()
-        print(e)
+        print(line_parts)
+        print(line)
 
 
 def handle_packets_from_bots():
@@ -610,15 +629,34 @@ def random_id():
 def random_ttl():
     """
     :return: random ttl. if i have more than 3 computers so it will be between 3-computers i have.
-    but if less so between 1- computers i have
+    but if less so the number of computers i have
     """
+    global AVAILABLE_BOTS
+    if len(AVAILABLE_BOTS) < 3:
+        return len(AVAILABLE_BOTS)
+    ttl = random.randint(3, len(AVAILABLE_BOTS))
+    return ttl
 
 
 def select_bot():
     """
-    select a bot by random from the data base you have
-    :return:
+    select a bot by random from the list of bots i have. i have the ttl and the * id
+    :return: list of the bots that will participate in the tor
     """
+    global AVAILABLE_BOTS
+    way_to_destination = []
+    # choosing how much computer i will pass
+    last_integer = None
+    ttl = random_ttl()
+    print(AVAILABLE_BOTS)
+    for i in range(0, ttl):
+        while True:
+            random_bot_id = random.choice(list(AVAILABLE_BOTS.keys()))
+            if last_integer != random_bot_id:
+                last_integer = random_bot_id
+                way_to_destination.append(random_bot_id)
+                break
+    return way_to_destination
 
 
 def get_mac_address1():
@@ -641,23 +679,44 @@ def check_user_info(client_socket_udp, client_socket_tcp):
     :return: nothing, i am putting in the global Packet_to_internet the new value
     """
     try:
-        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER
+        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER, AVAILABLE_BOTS, Port_for_bot, Mac_address
         data = None
         while True:
             user_input = input()
             if user_input == 'start':
-                # ttl = random_ttl()
-                # id1 = random_id()
-                # mac_bot = select_bot()
+                data = user_input.encode('utf-8')
+                mac_bot_list = select_bot()
                 ttl = 1
                 id1 = 1
                 mac_bot = '876'
                 first_packet = Tor_opening_packets
-                Packet_to_internet = Tor_opening_packets
-                Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
-                first_packet += f'start_first_stage_udp_hole_punching: {get_mac_address1()},{mac_bot}'
+                # Packet_to_internet = Tor_opening_packets.encode('utf-8')
+                print(f'the random way of the packet {mac_bot_list}')
+                # first_bot = mac_bot_list.pop(0)
+                if len(mac_bot_list) > 1:
+                    i = 1
+                    for bot in reversed(mac_bot_list):
+                        if i == 1:
+                            i += 1
+                            Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Port_for_bot}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode('utf-8') + data
+                            Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[-1]])
+                        else:
+                            Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Port_for_bot}\r\npacket_on_the_way: start{Mac_address},{who_to_send}finished'.encode('utf-8') + Packet_to_internet
+                            print(f'tha packet to send to the internet now: {Packet_to_internet}')
+                            if i != len(mac_bot_list):
+                                i += 1
+                                Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[bot])
+                        who_to_send = bot
+                    # Packet_to_internet = Tor_opening_packets.encode('utf-8') + Packet_to_internet
+                    Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+                else:
+                    Packet_to_internet = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {Port_for_bot}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode('utf-8') + data
+                    Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+                # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
+                # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
+                first_packet += f'start_first_stage_udp_hole_punching: {Mac_address},{mac_bot_list[0]}'
                 ciphertext = encrypt_server(first_packet.encode('utf-8'))
-                print(f' the packet i am sending to the server for moving the packet: {ciphertext}')
+                #print(f' the packet i am sending to the server for moving the packet: {ciphertext}')
                 client_socket_udp.sendto(ciphertext, (IPV4_OF_SERVER, PORT_OF_UDP_SERVER))
                 # response_from_server = client_socket_tcp.recv(1024)
                 # PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
@@ -711,7 +770,7 @@ def notify_mac_to_server(client_socket_tcp):
         packet_to_send = Tor_opening_packets
         Mac_address = get_mac_address1()
         # packet_to_send += f'new_client_to_server: {mac_address},{get_public_ip()},{Port_for_bot}\r\n'
-        packet_to_send += f'new_client_to_server: {Mac_address},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot}\r\n'
+        packet_to_send += f'new_client_to_server_main: {Mac_address},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot}\r\n'
         packet_to_send = sending_the_keys_for_security(packet_to_send)
         # print(f" how keys look : {packet_to_send.encode('utf-8')}")
         client_socket_tcp.send(packet_to_send.encode('utf-8'))
