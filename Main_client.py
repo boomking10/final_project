@@ -49,7 +49,7 @@ IPV4_OF_SERVER = '172.20.10.2'
 IPV6_OF_SERVER = '2a06:c701:4550:a00:fad4:e6f3:25c7:8b68'
 Tor_opening_packets = 'Tor\r\n'
 Packet_to_internet = None
-executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_')
+executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_', max_workers=10)
 PACKETS_TO_HANDLE_QUEUE = deque()
 Alice_dh_private_key, Alice_dh_public_key = None, None
 Alice_rsa_private_key, Alice_rsa_public_key = None, None
@@ -57,10 +57,12 @@ Alice_signature = None
 Shared_key_with_server = None
 Mac_address = None
 Iv_with_server = None
+STARTED_PUNCH_HOLE = False
+Way_of_the_packet = None
 Padder = padding.PKCS7(128).padder()
 Unpadder = padding.PKCS7(128).unpadder()
 # ipv4_public, ipv4_private_static, port_tcp, port udp
-DATA_OF_SERVERS = [('147.235.215.64', '10.0.0.11', 56789, 56779), ('188.120.157.25', '192.168.175.229', 56789, 56779), ('2.52.14.104', '172.20.10.2', 56789, 56779)]
+DATA_OF_SERVERS = [('147.235.215.64', '10.0.0.11', 56789, 56779), ('188.120.157.25', '192.168.175.229', 56789, 56779), ('2.52.14.104', '172.20.10.2', 56789, 56779), ('176.230.36.233', '192.168.1.149', 56789, 56779)]
 
 
 # security
@@ -256,7 +258,7 @@ def keeping_the_udp_punch_hole_alive(ipv4_for_punch_hole, port_for_punch_hole, c
     packet_to_keep_alive = 'keeping alive punch hole'
     while DATA_FROM_UDP_HOLE_PUNCHING is None:
         client_socket_udp.sendto(packet_to_keep_alive.encode('utf-8'), (ipv4_for_punch_hole, port_for_punch_hole))
-        time.sleep(30)
+        time.sleep(25)
 
 
 def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher):
@@ -268,45 +270,22 @@ def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, 
     :param client_socket_udp:
     :return: True so he can know that he can send him the actual data
     """
-    global DATA_FROM_UDP_HOLE_PUNCHING, Packet_to_internet
+    global DATA_FROM_UDP_HOLE_PUNCHING, Packet_to_internet, STARTED_PUNCH_HOLE
     try:
         i = 1
         print('starting the udp punch hole')
         # put here the real message you want to send
         #ciphertext = encrypt_bot(Packet_to_internet.encode('utf-8'), cipher)
+        print(f'the packet i am sending to the internet: {Packet_to_internet}')
+        STARTED_PUNCH_HOLE = True
         while DATA_FROM_UDP_HOLE_PUNCHING is None:
+            # if i == 1:
+            #     STARTED_PUNCH_HOLE = True
             client_socket_udp.sendto(Packet_to_internet, (ipv4_for_punch_hole, port_for_punch_hole))
             print(f'sent: {i} to {(ipv4_for_punch_hole, port_for_punch_hole)}')
             i += 1
-            try:
-                DATA_FROM_UDP_HOLE_PUNCHING, sender_address = client_socket_udp.recvfrom(1024)
-                print(f'data from udp hole_punching {DATA_FROM_UDP_HOLE_PUNCHING}')
-            except socket_timeout:  # !!
-                continue  # !!
-                # !!
-            except OSError as e:
-                print(f"Socket error occurred: {e}")
-            except ConnectionResetError as e:
-                print(f"Connection reset by peer: {e}")
-            except Exception as e:
-                print(f"An unexpected error occurred: {e}")
-            # adds the payload to the queue to wait for being handled
-        DATA_FROM_UDP_HOLE_PUNCHING = None
-        # print('exchanging security keys')
-        # sending_the_keys_for_security(client_socket_udp, (ipv4_for_punch_hole, port_for_punch_hole))
-
-        # waiting for the packet to come back
-        while DATA_FROM_UDP_HOLE_PUNCHING is None:
-            try:
-                data, sender_address = client_socket_udp.recvfrom(1024)
-                if data != 'do udp punch hole':
-                    DATA_FROM_UDP_HOLE_PUNCHING = data
-                    print(f'data from udp hole_punching on the way back {DATA_FROM_UDP_HOLE_PUNCHING}')
-            except socket_timeout:  # !!
-                continue  # !!
-        PACKETS_TO_HANDLE_QUEUE.append(DATA_FROM_UDP_HOLE_PUNCHING)
-        DATA_FROM_UDP_HOLE_PUNCHING = None
         # i want to keep the connection
+        client_socket_udp.sendto(Packet_to_internet, (ipv4_for_punch_hole, port_for_punch_hole))
     except Exception as e:
         traceback.print_exc()
         print(e)
@@ -321,7 +300,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
     :param client_socket_udp:
     :return:
     """
-    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server, AVAILABLE_BOTS
+    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server, AVAILABLE_BOTS, Way_of_the_packet
     replay_tor = Tor_opening_packets
     is_bytes = False
     try:
@@ -364,13 +343,6 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                     port_for_punch_hole = int(another[1])
                     cipher = AVAILABLE_BOTS[l_parts[2]]
                     executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
-            # -------------
-
-            # -------------
-            # [id]?[data] client Node to Client Node and client Node to main client
-            if line_parts[0] == 'packet_on__the_way_back:':
-                l_parts = line_parts[1].split('?')
-                # in l_parts[1] you have the data to show to the user
             # -------------
 
             # -------------
@@ -442,7 +414,10 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
             # -------------
             # [id]?[data]
             if line_parts[0] == 'packet_on__the_way_back:':
-                l_parts = line_parts[1].split('?')
+                data_from_google = payload
+                for each_bot in Way_of_the_packet:
+                    data_from_google = decrypt_bot(data_from_google, AVAILABLE_BOTS[each_bot])
+                print(f'the data that was in the packet is : {data_from_google}')
                 # check from the dictionary where to send the packet
     except Exception as e:
         traceback.print_exc()
@@ -558,6 +533,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     print('there is no available ipv6 for you so i am trying to do it with ipv4')
     # do here the ipv4 select
     client_socket = socket(AF_INET, SOCK_STREAM)
+    #client_socket.settimeout(0.2)
     avilable_serves = DATA_OF_SERVERS
     a = 0
     for i in range(0, len(DATA_OF_SERVERS)):
@@ -582,7 +558,7 @@ def setting_client_socket_for_bots():
         global Port_for_bot
         a = 0
         client_udp_socket = socket(AF_INET, SOCK_DGRAM)
-        client_udp_socket.settimeout(0.2)
+        #client_udp_socket.settimeout(0.2)
         # do bind !!!!!!!!!!!!!!!
         # client_udp_socket.bind((get_ipv4_address(), Port_for_bot))
         while a == 0:
@@ -635,6 +611,8 @@ def random_ttl():
     if len(AVAILABLE_BOTS) < 3:
         return len(AVAILABLE_BOTS)
     ttl = random.randint(3, len(AVAILABLE_BOTS))
+    if ttl > 10:
+        return 10
     return ttl
 
 
@@ -679,20 +657,21 @@ def check_user_info(client_socket_udp, client_socket_tcp):
     :return: nothing, i am putting in the global Packet_to_internet the new value
     """
     try:
-        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER, AVAILABLE_BOTS, Port_for_bot, Mac_address
+        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER, AVAILABLE_BOTS, Port_for_bot, Mac_address, Way_of_the_packet
         data = None
         while True:
             user_input = input()
             if user_input == 'start':
                 data = user_input.encode('utf-8')
                 mac_bot_list = select_bot()
-                ttl = 1
-                id1 = 1
-                mac_bot = '876'
+                Way_of_the_packet = mac_bot_list
                 first_packet = Tor_opening_packets
                 # Packet_to_internet = Tor_opening_packets.encode('utf-8')
                 print(f'the random way of the packet {mac_bot_list}')
                 # first_bot = mac_bot_list.pop(0)
+                if len(mac_bot_list) == 0:
+                    print('dont have enough compueters')
+                    return
                 if len(mac_bot_list) > 1:
                     i = 1
                     for bot in reversed(mac_bot_list):
@@ -712,6 +691,7 @@ def check_user_info(client_socket_udp, client_socket_tcp):
                 else:
                     Packet_to_internet = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {Port_for_bot}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode('utf-8') + data
                     Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+                Packet_to_internet = f'{Mac_address}to_know_which_thread'.encode('utf-8') + Packet_to_internet
                 # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
                 # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
                 first_packet += f'start_first_stage_udp_hole_punching: {Mac_address},{mac_bot_list[0]}'
@@ -786,9 +766,31 @@ def notify_mac_to_server(client_socket_tcp):
         print(e)
 
 
+def listening_to_udp(client_socket_udp):
+    """
+    listening to udp packets
+    :param client_socket_udp:
+    :return:
+    """
+    global DATA_FROM_UDP_HOLE_PUNCHING, PACKETS_TO_HANDLE_QUEUE, STARTED_PUNCH_HOLE
+    try:
+        while True:
+            #if STARTED_PUNCH_HOLE:
+            DATA_FROM_UDP_HOLE_PUNCHING, sender_address = client_socket_udp.recvfrom(16384)
+            print(f'data from udp hole_punching {DATA_FROM_UDP_HOLE_PUNCHING}')
+            if b'do udp punch hole' not in DATA_FROM_UDP_HOLE_PUNCHING:
+                print(f'data from udp hole_punching on the way back {DATA_FROM_UDP_HOLE_PUNCHING}')
+                if b'answer_from_google' in DATA_FROM_UDP_HOLE_PUNCHING:
+                    payload = DATA_FROM_UDP_HOLE_PUNCHING.split(b'answer_from_google')
+                    handle_packets_from_server(payload[0].decode('utf-8'), None, None, payload[1])
+                    DATA_FROM_UDP_HOLE_PUNCHING = None
+    except:
+        traceback.print_exc()
+
+
 def main():
     try:
-        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key
+        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, DATA_FROM_UDP_HOLE_PUNCHING
         client_socket_tcp = setting_client_socket_for_server_ipv6_or_ipv4()
         # making keys
         Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
@@ -812,9 +814,11 @@ def main():
         # print('3')
         # a thread for handling the packets
         executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
+        # a thread for listening to udp
+        executor.submit(listening_to_udp, client_socket_udp)
         while True:
-            response_from_server = client_socket_tcp.recv(4096)
-            # print(response_from_server)
+            response_from_server = client_socket_tcp.recv(16384)
+            #print(response_from_server)
             # add the packets to queue
             PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
     except Exception as e:

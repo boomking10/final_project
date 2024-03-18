@@ -36,17 +36,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15, MG
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
 import os
-from Crypto.PublicKey import RSA
-from Crypto.Random import get_random_bytes
-from Crypto.Cipher import AES, PKCS1_OAEP
-from Crypto.Protocol.KDF import scrypt
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Random import get_random_bytes
 
-# Generate DH key pair
-from Crypto.PublicKey import DSA
-from Crypto.Hash import SHA
-from Crypto.Protocol.KDF import scrypt
 
 Tor_opening_packets = 'Tor\r\n'
 # creating json file with my information there. this lines will be only in my code because
@@ -58,13 +48,15 @@ MY_DATA_FOR_CLIENTS_NODES = {}
 MY_DATA_FOR_MAIN_CLIENTS = {}
 # put here the port
 PORT_FOR_UDP = 56779
-executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_')
+executor = ThreadPoolExecutor(thread_name_prefix='worker_thread_', max_workers=80)
 Alice_dh_private_key, Alice_dh_public_key = None, None
 Alice_rsa_private_key, Alice_rsa_public_key = None, None
 Alice_signature = None
 Padder = padding.PKCS7(128).padder()
 Unpadder = padding.PKCS7(128).unpadder()
 Id_for_clients = 1
+# list that will contain queus for each client
+LIST_OF_QUEUES_FOR_EACH_CLIENT = {}
 
 
 # # Use forward slashes or a raw string for the file path
@@ -249,8 +241,7 @@ def get_subnet_mask():
             return None
 
     except Exception as e:
-        print(f"Error: {e}")
-        return None
+        traceback.print_exc()
 
 
 def are_in_same_network(ip1, ip2, subnet_mask):
@@ -297,7 +288,6 @@ def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, po
         return packet_to_add
     except Exception as e:
         traceback.print_exc()
-        print(e)
 
 
 def handle_first_stage_udp_hole_punching(mac_of_the_person2, ip, port):
@@ -332,7 +322,7 @@ def handle_first_stage_udp_hole_punching(mac_of_the_person2, ip, port):
                 packet_to_add = f'server_answer_for_first_stage_udp_hole_punching: yes?({ip},{port})?{mac_of_the_person2}'
         return packet_to_add
     except Exception as e:
-        print(e)
+        traceback.print_exc()
 
 
 def notify_a_new_client_for_other_clients(public_dh_of_new, bob_iv, mac_of_the_new_client, client_socket_of_new_client):
@@ -361,11 +351,12 @@ def notify_a_new_client_for_other_clients(public_dh_of_new, bob_iv, mac_of_the_n
             # then sending to the new client
             # message = Tor_opening_packets
             message_to_all = f'new_client_to_server_node: {key}\r\nsigh_message_for_computer: goren'
-            add_sign_to_new += message_to_all.encode('utf-8') + serialize_public_key(value[2][1]) + 'amit'.encode('utf-8') + bob_iv + '\r\n'.encode('utf-8')
+            add_sign_to_new += message_to_all.encode('utf-8') + serialize_public_key(value[2][1]) + 'amit'.encode(
+                'utf-8') + bob_iv + '\r\n'.encode('utf-8')
         if add_sign_to_new != b'':
             add_sign_to_new = Tor_opening_packets.encode('utf-8') + add_sign_to_new
-            print(f' notifying new client: {add_sign_to_new}')
             cipher_text = encrypt(add_sign_to_new, mac_of_the_new_client)
+            print(f' notifying new client: {cipher_text}')
             client_socket_of_new_client.send(cipher_text)
     elif mac_of_the_new_client in MY_DATA_FOR_CLIENTS_NODES:
         message = Tor_opening_packets
@@ -478,6 +469,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 # replay_tor2 += '\r\nsigh_message_for_computer: goren'
 
                 if l_parts[1] in MY_DATA_FOR_MAIN_CLIENTS:
+
                     print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
                     # add_sign = replay_tor2.encode('utf-8') + serialize_public_key(
                     #     MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[0]][2][
@@ -509,12 +501,19 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 replay_tor += handle_first_stage_udp_hole_punching(l_parts[0], client_address[0], client_address[1])
                 # sending to the client i got the packet from
                 if l_parts[1] in MY_DATA_FOR_CLIENTS_NODES:
+                    key_to_thread = id_to_pass
                     client_socket = MY_DATA_FOR_CLIENTS_NODES[l_parts[1]][1]
                 elif l_parts[1] in MY_DATA_FOR_MAIN_CLIENTS:
+                    key_to_thread = l_parts[1]
                     client_socket = MY_DATA_FOR_MAIN_CLIENTS[l_parts[1]][1]
                 # replay_tor += '\r\nsigh_message_for_computer: goren'
                 # send_key = replay_tor.encode('utf-8') + serialize_public_key(
                 #     MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[1]][2][3]
+                replay_tor3 = Tor_opening_packets + f'start_punch_hole: {key_to_thread}'
+                ciphertext = encrypt(replay_tor3.encode('utf-8'), l_parts[0])
+                where_to_send = MY_DATA_FOR_CLIENTS_NODES[l_parts[0]][1]
+                # notifying the other bot he can start the punch hole
+                where_to_send.send(ciphertext)
                 print(f' what i am sending to the first bot in punch hole: {replay_tor}')
                 ciphertext = encrypt(replay_tor.encode('utf-8'), l_parts[1])
                 client_socket.send(ciphertext)
@@ -615,7 +614,6 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                         MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][1])
     except Exception as e:
         traceback.print_exc()
-        print(e)
 
 
 def tor_filter(payload):
@@ -656,7 +654,7 @@ def get_public_ip() -> str:
                     if response.text.strip() != '':  # some APIs may reply with empty strings
                         return response.text.strip()
             except:
-                pass
+                traceback.print_exc()
     # ----------------
 
     # If all failed
@@ -675,7 +673,7 @@ def handle_packet_from_udp(server_socket_udp):
     """
     while True:
         try:
-            data, client_address = server_socket_udp.recvfrom(2048)
+            data, client_address = server_socket_udp.recvfrom(16384)
             # print(f' what i am recieving from clients: {data}')
             mac = None
             for key, value in MY_DATA_FOR_MAIN_CLIENTS.items():
@@ -688,6 +686,7 @@ def handle_packet_from_udp(server_socket_udp):
                     break
             if mac is None:
                 for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
+                    print(f'the id of the client: {key} the value of the client: {value} and the address of who sent the packet: {client_address}')
                     if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
                         # so the server and the bot are on the same network
                         mac = key
@@ -701,7 +700,7 @@ def handle_packet_from_udp(server_socket_udp):
                 handle_packets_from_computers(data_from_packet, None, client_address, server_socket_udp, plaint_text,
                                               mac)
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            # print(f"An unexpected error occurred: {e}")
             traceback.print_exc()
         # adds the payload to the queue to wait for being handled
 
@@ -742,39 +741,42 @@ def set_socket_tcp():
     return server_socket
 
 
-def new_clients(client_socket, client_address, server_socket_udp):
+def verify_clients(client_socket, client_address, server_socket_udp):
     """
-    verifying the packet
-    and listening to packets
+
     :param client_socket:
     :param client_address:
     :param server_socket_udp:
     :return:
     """
-    global executor
-    # telling the client my port for udp
-    # executor.submit(handle_packet_from_udp, server_socket_udp)
-    # response = client_socket.recv(1024)
-    # if tor_filter(response):
-    #     data_from_packet = response.decode('utf-8')
-    #     handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp)
-    try:
-        finished_exchanging_keys = 0
-        mac = None
-        while True:
-            incoming_packet = client_socket.recv(4096)
-            if finished_exchanging_keys < 2:
-                if tor_filter(incoming_packet):
-                    # print('passed')
-                    if b'goren' in incoming_packet:
-                        data1 = incoming_packet.split(b'goren')[0]
-                    else:
-                        data1 = incoming_packet
-                    data_from_packet = data1.decode('utf-8')
-                    finished_exchanging_keys += 1
-                    # print(data_from_packet)
-            else:
-                for key, value in MY_DATA_FOR_MAIN_CLIENTS.items():
+    global LIST_OF_QUEUES_FOR_EACH_CLIENT
+    finished_exchanging_keys = 0
+    mac = None
+    while True:
+        if len(LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket]) < 1:
+            continue
+        incoming_packet = LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket].popleft()
+        if finished_exchanging_keys < 2:
+            if tor_filter(incoming_packet):
+                # print('passed')
+                if b'goren' in incoming_packet:
+                    data1 = incoming_packet.split(b'goren')[0]
+                else:
+                    data1 = incoming_packet
+                data_from_packet = data1.decode('utf-8')
+                finished_exchanging_keys += 1
+                # print(data_from_packet)
+        else:
+            for key, value in MY_DATA_FOR_MAIN_CLIENTS.items():
+                if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
+                    # so the server and the bot are on the same network
+                    mac = key
+                    break
+                elif value[0][1] == client_address[0]:
+                    mac = key
+                    break
+            if mac is None:
+                for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
                     if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
                         # so the server and the bot are on the same network
                         mac = key
@@ -782,27 +784,32 @@ def new_clients(client_socket, client_address, server_socket_udp):
                     elif value[0][1] == client_address[0]:
                         mac = key
                         break
-                if mac is None:
-                    for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
-                        if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
-                            # so the server and the bot are on the same network
-                            mac = key
-                            break
-                        elif value[0][1] == client_address[0]:
-                            mac = key
-                            break
-                plaint_text = decrypt(incoming_packet, mac)
-                if tor_filter(plaint_text):
-                    data_from_packet = plaint_text.decode('utf-8')
-            handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp,
-                                          incoming_packet, mac)
+            plaint_text = decrypt(incoming_packet, mac)
+            if tor_filter(plaint_text):
+                data_from_packet = plaint_text.decode('utf-8')
+        handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp,
+                                      incoming_packet, mac)
+
+
+def new_clients(client_socket):
+    """
+    verifying the packet
+    and listening to packets
+    :param client_socket:
+    :return:
+    """
+    global LIST_OF_QUEUES_FOR_EACH_CLIENT
+    try:
+        while True:
+            incoming_packet = client_socket.recv(16384)
+            LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket].append(incoming_packet)
     except Exception as e:
         traceback.print_exc()
 
 
 def main():
     try:
-        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key
+        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, LIST_OF_QUEUES_FOR_EACH_CLIENT
         server_socket_tcp = set_socket_tcp()
         server_socket_udp = set_socket_udp()
         print(f'your private ip: {get_ipv4_address_private()}')
@@ -825,10 +832,13 @@ def main():
                 server_socket_tcp.listen(1)  # getting incoming packets
                 client_socket, client_address = server_socket_tcp.accept()
                 print(f' the address of the client who connected: {client_address}')
-                executor.submit(new_clients, client_socket, client_address, server_socket_udp)
+                LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket] = deque()
+                executor.submit(new_clients, client_socket)
+                executor.submit(verify_clients, client_socket, client_address, server_socket_udp)
+                print('opend thread')
                 # PACKETS_TO_HANDLE_QUEUE.append((client_socket, client_address))
             except Exception as e:
-                print(e)
+                traceback.print_exc()
     except Exception as e:
         traceback.print_exc()
         print(e)
