@@ -2,8 +2,11 @@
 import os
 import re
 import subprocess
+import webbrowser
 
+import pygame
 import requests
+import sys
 
 """""""""""""""""""""""""""""""""THE PROTOCOL FOR THE PACKETS"""""""""""""""""""""""
 "Tor;""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""''""""""""''"""
@@ -38,6 +41,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15, MG
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
 
+DATA_FROM_OPENING_SCREEN = ""
 THE_PACKET_GOT_BACK = None
 DATA_FROM_UDP_HOLE_PUNCHING = None
 # dictionary of all the available bots i have mac: (cipher object)
@@ -59,10 +63,16 @@ Mac_address = None
 Iv_with_server = None
 STARTED_PUNCH_HOLE = False
 Way_of_the_packet = None
+URL_TOO_BIG = None
+Start_time = None
+OPEN_TOR = True
+SERVER_APPROVED = False
+NO_AVAILABLE_SERVES = False
 Padder = padding.PKCS7(128).padder()
 Unpadder = padding.PKCS7(128).unpadder()
 # ipv4_public, ipv4_private_static, port_tcp, port udp
-DATA_OF_SERVERS = [('147.235.215.64', '10.0.0.11', 56789, 56779), ('188.120.157.25', '192.168.175.229', 56789, 56779), ('2.52.14.104', '172.20.10.2', 56789, 56779), ('176.230.36.233', '192.168.1.149', 56789, 56779)]
+DATA_OF_SERVERS = [('147.235.215.64', '10.0.0.11', 56789, 56779), ('188.120.157.25', '192.168.175.229', 56789, 56779),
+                   ('2.52.14.104', '172.20.10.2', 56789, 56779), ('176.230.36.233', '192.168.1.149', 56789, 56779)]
 
 
 # security
@@ -123,11 +133,10 @@ def sign_message(message, public_key):
     return alice_signature
 
 
-
 def encrypt_server(plaintext):
     global Shared_key_with_server
     # (encryptor, decryptor, padder, unpadder)
-    #print(f' the plaint text before encrypting: {plaintext}')
+    # print(f' the plaint text before encrypting: {plaintext}')
     padder = padding.PKCS7(128).padder()
     cipher = Shared_key_with_server
     encryptor = cipher.encryptor()
@@ -147,7 +156,7 @@ def decrypt_server(ciphertext):
         decrypted_padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
         # Unpad the decrypted plaintext
-        #print(f' my unpadder: {Shared_key_with_server[3].block_size}')
+        # print(f' my unpadder: {Shared_key_with_server[3].block_size}')
         plaintext = unpadder.update(decrypted_padded_plaintext) + unpadder.finalize()
         return plaintext
     except:
@@ -157,7 +166,7 @@ def decrypt_server(ciphertext):
 def encrypt_bot(plaintext, cipher):
     global Shared_key_with_server
     # (encryptor, decryptor, padder, unpadder)
-    #print(f' the plaint text before encrypting: {plaintext}')
+    # print(f' the plaint text before encrypting: {plaintext}')
     encryptor = cipher.encryptor()
     padder = padding.PKCS7(128).padder()
     padded_plaintext = padder.update(plaintext) + padder.finalize()
@@ -174,7 +183,7 @@ def decrypt_bot(ciphertext, cipher):
     decrypted_padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
     # Unpad the decrypted plaintext
-    #print(f' my unpadder: {Shared_key_with_server[3].block_size}')
+    # print(f' my unpadder: {Shared_key_with_server[3].block_size}')
     plaintext = unpadder.update(decrypted_padded_plaintext) + unpadder.finalize()
     return plaintext
 
@@ -224,9 +233,10 @@ def verify_packets_from_server(client_socket_tcp, client_socket_udp):
     checking that the packets are really from the clients
     :return:
     """
+    global OPEN_TOR
     try:
         global PACKETS_TO_HANDLE_QUEUE
-        while True:
+        while OPEN_TOR:
             if len(PACKETS_TO_HANDLE_QUEUE) < 1:
                 continue
             # print(len(PACKETS_TO_HANDLE_QUEUE))
@@ -275,7 +285,7 @@ def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, 
         i = 1
         print('starting the udp punch hole')
         # put here the real message you want to send
-        #ciphertext = encrypt_bot(Packet_to_internet.encode('utf-8'), cipher)
+        # ciphertext = encrypt_bot(Packet_to_internet.encode('utf-8'), cipher)
         print(f'the packet i am sending to the internet: {Packet_to_internet}')
         STARTED_PUNCH_HOLE = True
         while DATA_FROM_UDP_HOLE_PUNCHING is None:
@@ -300,13 +310,13 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
     :param client_socket_udp:
     :return:
     """
-    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server, AVAILABLE_BOTS, Way_of_the_packet
+    global executor, Tor_opening_packets, Packet_to_internet, PORT_OF_UDP_SERVER, Alice_dh_public_key, Mac_address, Shared_key_with_server, Iv_with_server, AVAILABLE_BOTS, Way_of_the_packet, Mac_address, URL_TOO_BIG, Start_time, SERVER_APPROVED
     replay_tor = Tor_opening_packets
     is_bytes = False
     try:
         if b'sigh_message_for_computer:' in payload:
             lines = payload.split(b'\r\n')
-            is_bytes =True
+            is_bytes = True
             while b'' in lines:
                 lines.remove(b'')
         else:
@@ -342,7 +352,17 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                     ipv4_for_punch_hole = another[0]
                     port_for_punch_hole = int(another[1])
                     cipher = AVAILABLE_BOTS[l_parts[2]]
+                    Packet_to_internet = f'{Mac_address}to_know_which_thread'.encode('utf-8') + Packet_to_internet
                     executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'same_network:':
+                ipv4_to_send_port = line_parts[1].split(',')
+                ipv4_to_send = ipv4_to_send_port[0]
+                port_to_send = ipv4_to_send_port[1]
+                Packet_to_internet = f'{Mac_address}do_decrypt'.encode('utf-8') + Packet_to_internet
+                client_socket_udp.sendto(Packet_to_internet, (ipv4_to_send, int(port_to_send)))
             # -------------
 
             # -------------
@@ -353,7 +373,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                 replay_tor += f"mac_of_the_person_who_sent_the_packet: {Mac_address}\r\nsigh_message: goren"
                 # print(f'the packet i am sending with sign: {reply_tor}')
                 Iv_with_server = os.urandom(16)  # 16 bytes IV for AES
-                client_socket_tcp.send(replay_tor.encode('utf-8')+signed_dh + 'amit'.encode('utf-8') + Iv_with_server)
+                client_socket_tcp.send(replay_tor.encode('utf-8') + signed_dh + 'amit'.encode('utf-8') + Iv_with_server)
             # -------------
 
             # -------------
@@ -377,7 +397,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                 # print(f' the dectypted public key: {decrypted_bob_dh_public_key} and type{type(decrypted_bob_dh_public_key)}')
                 # print(f'the real public key: {bob_dh_public}')
                 # print(f' value of dh private: {Alice_dh_private_key.private_bytes(encoding=serialization.Encoding.PEM,format=serialization.PrivateFormat.PKCS8,encryption_algorithm=serialization.NoEncryption())} and value of dh public: {serialize_public_key(bob_dh_public)}')
-                #print(f'alic param p and g: {Alice_dh_private_key.parameters().parameter_numbers().p},{Alice_dh_private_key.parameters().parameter_numbers().g} and bob params p and g: {bob_dh_public.public_numbers().parameter_numbers.p},{bob_dh_public.public_numbers().parameter_numbers.g}')
+                # print(f'alic param p and g: {Alice_dh_private_key.parameters().parameter_numbers().p},{Alice_dh_private_key.parameters().parameter_numbers().g} and bob params p and g: {bob_dh_public.public_numbers().parameter_numbers.p},{bob_dh_public.public_numbers().parameter_numbers.g}')
                 Shared_key_with_server = Alice_dh_private_key.exchange(bob_dh_public)
                 Shared_key_with_server = Shared_key_with_server[:32]
                 print(f'the len of shared key: {len(Shared_key_with_server)}')
@@ -396,13 +416,14 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                 bob_public_dh = bob_public_dh_and_iv[0]
                 bob_iv = bob_public_dh_and_iv[1]
                 print(f'bob iv len: {len(bob_iv)}')
-                shared_secret = Alice_dh_private_key.exchange(serialization.load_pem_public_key(bob_public_dh, backend=default_backend()))[:32]
+                shared_secret = Alice_dh_private_key.exchange(
+                    serialization.load_pem_public_key(bob_public_dh, backend=default_backend()))[:32]
                 cipher = Cipher(algorithms.AES(shared_secret),
                                 modes.CBC(bob_iv),
                                 backend=default_backend())
                 # opening a thread for udp punch_hole
                 AVAILABLE_BOTS[mac_of_new_client] = cipher
-                #executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
+                # executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher)
                 print(f'new client connected to server: {AVAILABLE_BOTS}')
             # -------------
 
@@ -417,8 +438,26 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                 data_from_google = payload
                 for each_bot in Way_of_the_packet:
                     data_from_google = decrypt_bot(data_from_google, AVAILABLE_BOTS[each_bot])
-                print(f'the data that was in the packet is : {data_from_google}')
+                # print(f'the data that was in the packet is : {data_from_google}')
+                Way_of_the_packet = None
+                Start_time = None
+                # showing the user the answer from google
+                if data_from_google != b'false':
+                    show_html_in_chrome(data_from_google.decode('utf-8'))
+                else:
+                    URL_TOO_BIG = "not available site or not correct url or too big "
                 # check from the dictionary where to send the packet
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'node_disconnect:':
+                print(f'node dissconnect: {line_parts[1]}')
+                del AVAILABLE_BOTS[line_parts[1]]
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'approved:':
+                SERVER_APPROVED = True
     except Exception as e:
         traceback.print_exc()
         print(line_parts)
@@ -520,7 +559,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     """
     # here he will open the json file and will pick up randomly a computer for ipv6
     # when i will have the db i will change the for
-    global IPV4_OF_SERVER, IPV6_OF_SERVER, DATA_OF_SERVERS
+    global IPV4_OF_SERVER, IPV6_OF_SERVER, DATA_OF_SERVERS, NO_AVAILABLE_SERVES
     for i in range(1, 2):
         try:
             ipv6 = select_ipv6_server()
@@ -533,7 +572,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     print('there is no available ipv6 for you so i am trying to do it with ipv4')
     # do here the ipv4 select
     client_socket = socket(AF_INET, SOCK_STREAM)
-    #client_socket.settimeout(0.2)
+    # client_socket.settimeout(5)
     avilable_serves = DATA_OF_SERVERS
     a = 0
     for i in range(0, len(DATA_OF_SERVERS)):
@@ -547,6 +586,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
             print('server is not available. trying another one.')
             del avilable_serves[index_if_not_working]
     if a == 0:
+        NO_AVAILABLE_SERVES = True
         print('there is no available server right now, please try later')
     else:
         print(f"connected to : {IPV4_OF_SERVER}")
@@ -558,7 +598,7 @@ def setting_client_socket_for_bots():
         global Port_for_bot
         a = 0
         client_udp_socket = socket(AF_INET, SOCK_DGRAM)
-        #client_udp_socket.settimeout(0.2)
+        client_udp_socket.settimeout(5)
         # do bind !!!!!!!!!!!!!!!
         # client_udp_socket.bind((get_ipv4_address(), Port_for_bot))
         while a == 0:
@@ -645,6 +685,15 @@ def get_mac_address1():
         print(e)
 
 
+def show_html_in_chrome(html_content):
+    # Save HTML content to a temporary file with UTF-8 encoding
+    with open("temp.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    # Open the temporary HTML file in Chrome
+    webbrowser.open("temp.html")
+
+
 def check_user_info(client_socket_udp, client_socket_tcp):
     """
     checking here if the user typed something.
@@ -657,50 +706,53 @@ def check_user_info(client_socket_udp, client_socket_tcp):
     :return: nothing, i am putting in the global Packet_to_internet the new value
     """
     try:
-        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER, AVAILABLE_BOTS, Port_for_bot, Mac_address, Way_of_the_packet
+        global Tor_opening_packets, Packet_to_internet, IPV4_OF_SERVER, PORT_OF_UDP_SERVER, AVAILABLE_BOTS, Port_for_bot, Mac_address, Way_of_the_packet, DATA_FROM_OPENING_SCREEN
         data = None
-        while True:
-            user_input = input()
-            if user_input == 'start':
-                data = user_input.encode('utf-8')
-                mac_bot_list = select_bot()
-                Way_of_the_packet = mac_bot_list
-                first_packet = Tor_opening_packets
-                # Packet_to_internet = Tor_opening_packets.encode('utf-8')
-                print(f'the random way of the packet {mac_bot_list}')
-                # first_bot = mac_bot_list.pop(0)
-                if len(mac_bot_list) == 0:
-                    print('dont have enough compueters')
-                    return
-                if len(mac_bot_list) > 1:
-                    i = 1
-                    for bot in reversed(mac_bot_list):
-                        if i == 1:
-                            i += 1
-                            Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Port_for_bot}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode('utf-8') + data
-                            Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[-1]])
-                        else:
-                            Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Port_for_bot}\r\npacket_on_the_way: start{Mac_address},{who_to_send}finished'.encode('utf-8') + Packet_to_internet
-                            print(f'tha packet to send to the internet now: {Packet_to_internet}')
-                            if i != len(mac_bot_list):
-                                i += 1
-                                Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[bot])
-                        who_to_send = bot
-                    # Packet_to_internet = Tor_opening_packets.encode('utf-8') + Packet_to_internet
-                    Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+        start_time = None
+        data = DATA_FROM_OPENING_SCREEN.encode('utf-8')
+        mac_bot_list = select_bot()
+        Way_of_the_packet = mac_bot_list
+        first_packet = Tor_opening_packets
+        # Packet_to_internet = Tor_opening_packets.encode('utf-8')
+        print(f'the random way of the packet {mac_bot_list}')
+        # first_bot = mac_bot_list.pop(0)
+        if len(mac_bot_list) == 0:
+            print('dont have enough computers')
+            return False
+        if len(mac_bot_list) > 1:
+            i = 1
+            for bot in reversed(mac_bot_list):
+                if i == 1:
+                    i += 1
+                    Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Mac_address}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode(
+                        'utf-8') + data
+                    Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[-1]])
                 else:
-                    Packet_to_internet = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {Port_for_bot}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode('utf-8') + data
-                    Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
-                Packet_to_internet = f'{Mac_address}to_know_which_thread'.encode('utf-8') + Packet_to_internet
-                # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
-                # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
-                first_packet += f'start_first_stage_udp_hole_punching: {Mac_address},{mac_bot_list[0]}'
-                ciphertext = encrypt_server(first_packet.encode('utf-8'))
-                #print(f' the packet i am sending to the server for moving the packet: {ciphertext}')
-                client_socket_udp.sendto(ciphertext, (IPV4_OF_SERVER, PORT_OF_UDP_SERVER))
-                # response_from_server = client_socket_tcp.recv(1024)
-                # PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
-                # print('got here')
+                    Packet_to_internet = f'{Tor_opening_packets}id_of_packet: {Mac_address}\r\npacket_on_the_way: start{Mac_address},{who_to_send}finished'.encode(
+                        'utf-8') + Packet_to_internet
+                    print(f'tha packet to send to the internet now: {Packet_to_internet}')
+                    if i != len(mac_bot_list):
+                        i += 1
+                        Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[bot])
+                who_to_send = bot
+            # Packet_to_internet = Tor_opening_packets.encode('utf-8') + Packet_to_internet
+            Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+        else:
+            Packet_to_internet = Tor_opening_packets.encode(
+                'utf-8') + f'id_of_packet: {Mac_address}\r\npacket_on_the_way: first_person{Mac_address}buda_end'.encode(
+                'utf-8') + data
+            Packet_to_internet = encrypt_bot(Packet_to_internet, AVAILABLE_BOTS[mac_bot_list[0]])
+        # Packet_to_internet = f'{Mac_address}to_know_which_thread'.encode('utf-8') + Packet_to_internet
+        # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
+        # Packet_to_internet += f'packet_on_the_way: {id1}?{ttl}?{data}'
+        first_packet += f'start_first_stage_udp_hole_punching: {Mac_address},{mac_bot_list[0]}'
+        ciphertext = encrypt_server(first_packet.encode('utf-8'))
+        # print(f' the packet i am sending to the server for moving the packet: {ciphertext}')
+        client_socket_udp.sendto(ciphertext, (IPV4_OF_SERVER, PORT_OF_UDP_SERVER))
+        # Add a small delay to avoid continuous checking and high CPU usage
+        # response_from_server = client_socket_tcp.recv(1024)
+        # PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
+        # print('got here')
     except Exception as e:
         traceback.print_exc()
         print(f' got it here {e}')
@@ -750,7 +802,7 @@ def notify_mac_to_server(client_socket_tcp):
         packet_to_send = Tor_opening_packets
         Mac_address = get_mac_address1()
         # packet_to_send += f'new_client_to_server: {mac_address},{get_public_ip()},{Port_for_bot}\r\n'
-        packet_to_send += f'new_client_to_server_main: {Mac_address},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot}\r\n'
+        packet_to_send += f'new_client_to_server_main: {Mac_address},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot},{str(get_subnet_mask())}\r\n'
         packet_to_send = sending_the_keys_for_security(packet_to_send)
         # print(f" how keys look : {packet_to_send.encode('utf-8')}")
         client_socket_tcp.send(packet_to_send.encode('utf-8'))
@@ -772,57 +824,298 @@ def listening_to_udp(client_socket_udp):
     :param client_socket_udp:
     :return:
     """
-    global DATA_FROM_UDP_HOLE_PUNCHING, PACKETS_TO_HANDLE_QUEUE, STARTED_PUNCH_HOLE
+    global DATA_FROM_UDP_HOLE_PUNCHING, PACKETS_TO_HANDLE_QUEUE, STARTED_PUNCH_HOLE, OPEN_TOR
     try:
-        while True:
-            #if STARTED_PUNCH_HOLE:
-            DATA_FROM_UDP_HOLE_PUNCHING, sender_address = client_socket_udp.recvfrom(16384)
-            print(f'data from udp hole_punching {DATA_FROM_UDP_HOLE_PUNCHING}')
-            if b'do udp punch hole' not in DATA_FROM_UDP_HOLE_PUNCHING:
-                print(f'data from udp hole_punching on the way back {DATA_FROM_UDP_HOLE_PUNCHING}')
-                if b'answer_from_google' in DATA_FROM_UDP_HOLE_PUNCHING:
-                    payload = DATA_FROM_UDP_HOLE_PUNCHING.split(b'answer_from_google')
-                    handle_packets_from_server(payload[0].decode('utf-8'), None, None, payload[1])
-                    DATA_FROM_UDP_HOLE_PUNCHING = None
+        while OPEN_TOR:
+            # if STARTED_PUNCH_HOLE:
+            try:
+                DATA_FROM_UDP_HOLE_PUNCHING, sender_address = client_socket_udp.recvfrom(40000)
+                print(f'data from udp hole_punching {DATA_FROM_UDP_HOLE_PUNCHING}')
+                if b'do udp punch hole' not in DATA_FROM_UDP_HOLE_PUNCHING:
+                    print(f'data from udp hole_punching on the way back {DATA_FROM_UDP_HOLE_PUNCHING}')
+                    if b'answer_from_google' in DATA_FROM_UDP_HOLE_PUNCHING:
+                        payload = DATA_FROM_UDP_HOLE_PUNCHING.split(b'answer_from_google')
+                        handle_packets_from_server(payload[0].decode('utf-8'), None, None, payload[1])
+                        DATA_FROM_UDP_HOLE_PUNCHING = None
+            except socket_timeout:
+                continue
     except:
         traceback.print_exc()
 
 
+def opening_screen():
+    global Shared_key_with_server, NO_AVAILABLE_SERVES
+    pygame.init()
+
+    # Set the dimensions of the window
+    WINDOW_WIDTH = 1065
+    WINDOW_HEIGHT = 670
+    # Load the image
+    font = pygame.font.SysFont(None, 50)
+    font_for_nodes = pygame.font.SysFont(None, 30)
+    image_path = "graphics_for_last_project/connect_server.png"  # Replace with the path to your image
+    # image_path = "C:/Networks/last_project/graphics_for_last_project/opening_screen_for_last_project.png"
+    image = pygame.image.load(image_path)
+    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("connect_main")
+    window.fill((255, 255, 255))  # Fill with white color
+
+    # Draw the image on the screen
+    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+    pygame.display.update()
+    while Shared_key_with_server is None:
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                # sys.exit()
+        if NO_AVAILABLE_SERVES:
+            window.fill((0, 0, 0))  # Fill with white color
+            text_surface = font.render(f"THERE ARE NO AVAILABLE SERVES AT THE MOMENT", True, (255, 255, 255))
+            window.blit(text_surface, (60, 310))
+            text_surface = font_for_nodes.render(f"PLEASE TRY AGAIN LATER", True,
+                                                 (255, 255, 255))
+            window.blit(text_surface, (350, 400))
+            pygame.display.update()
+    # Quit Pygame
+    # pygame.quit()
+
+
 def main():
+    global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, DATA_FROM_UDP_HOLE_PUNCHING, OPEN_TOR, SERVER_APPROVED
     try:
-        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, DATA_FROM_UDP_HOLE_PUNCHING
+        executor.submit(opening_screen)
         client_socket_tcp = setting_client_socket_for_server_ipv6_or_ipv4()
         # making keys
-        Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
-        Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
-        # Alice signs her DH public key
-        print('did keys')
+        if NO_AVAILABLE_SERVES is False:
+            Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
+            Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
+            # Alice signs her DH public key
+            print('did keys')
+            # waits_for_server_approve = client_socket_tcp.recv(1024)
+            # print(waits_for_server_approve)
+            # notifying the server about my mac
+            select_random_port()
+            notify_mac_to_server(client_socket_tcp)
+            client_socket_tcp.settimeout(5)
+            # print('1')
+            # here getting the keys from the server
+            # data = client_socket_tcp.recv(1024)
+            # handling_keys_from_server(data)
+            client_socket_udp = setting_client_socket_for_bots()
+            # print('2')
+            # calling the function who checks if the user typed something
+            executor.submit(second_screen, client_socket_udp, client_socket_tcp)
+            # executor.submit(check_user_info, client_socket_udp, client_socket_tcp)
+            # print('3')
+            # a thread for handling the packets
+            executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
+            # a thread for listening to udp
+            executor.submit(listening_to_udp, client_socket_udp)
+            while OPEN_TOR:
+                try:
+                    response_from_server = client_socket_tcp.recv(40000)
+                    # print(response_from_server)
+                    # add the packets to queue
+                    PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
+                except socket_timeout:
+                    continue
+            final_message = Tor_opening_packets.encode('utf-8') + f'main_disconnect: {Mac_address}'.encode('utf-8')
+            ciphertext = encrypt_server(final_message)
+            client_socket_tcp.send(ciphertext)
+            client_socket_tcp.settimeout(None)
+            while SERVER_APPROVED is False:
+                payload = client_socket_tcp.recv(2048)
+                plaint_text = decrypt_server(payload)
+                if tor_filter(plaint_text):
+                    data1 = plaint_text
+                    data_from_packet = data1.decode('utf-8')
+                    # print(data_from_packet)
+                    handle_packets_from_server(data_from_packet, client_socket_tcp, client_socket_udp, plaint_text)
 
-        # waits_for_server_approve = client_socket_tcp.recv(1024)
-        # print(waits_for_server_approve)
-        # notifying the server about my mac
-        select_random_port()
-        notify_mac_to_server(client_socket_tcp)
-        # print('1')
-        # here getting the keys from the server
-        # data = client_socket_tcp.recv(1024)
-        # handling_keys_from_server(data)
-        client_socket_udp = setting_client_socket_for_bots()
-        # print('2')
-        # calling the function who checks if the user typed something
-        executor.submit(check_user_info, client_socket_udp, client_socket_tcp)
-        # print('3')
-        # a thread for handling the packets
-        executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
-        # a thread for listening to udp
-        executor.submit(listening_to_udp, client_socket_udp)
-        while True:
-            response_from_server = client_socket_tcp.recv(16384)
-            #print(response_from_server)
-            # add the packets to queue
-            PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
-    except Exception as e:
-        print(e)
+    # except:
+    #     print("closed")
+    except KeyboardInterrupt:
+        print("Program interrupted by user")
+        # Additional cleanup or logging code here
+    except SystemExit:
+        print("Program exited")
+
+
+def second_screen(client_socket_udp, client_socket_tcp):
+    global DATA_FROM_OPENING_SCREEN, Way_of_the_packet, URL_TOO_BIG, AVAILABLE_BOTS, Start_time, OPEN_TOR, Mac_address
+    pygame.quit()
+    pygame.init()
+    # Set the dimensions of the window
+    WINDOW_WIDTH = 1065
+    WINDOW_HEIGHT = 670
+    # Load the image
+
+    image_path = "graphics_for_last_project/opening_screen_for_last_project.png"  # Replace with the path to your image
+    image = pygame.image.load(image_path)
+
+    font = pygame.font.SysFont(None, 30)
+    font_for_nodes = pygame.font.SysFont(None, 50)
+    # Set up the display
+    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption(f"Main: {Mac_address}")
+
+    input_text = ""
+    prev_text = ""
+    input_rect = pygame.Rect(24, 330, 1028, 44)  # Position and size of the input box
+    color_active = pygame.Color('black')  # Color when active (typing)
+    color_inactive = pygame.Color('white')  # Color when inactive
+    color = color_inactive
+    active = False
+    prev_active = False
+    prev_numbers_of_nodes = len(AVAILABLE_BOTS)
+    # Clear the screen
+    window.fill((255, 255, 255))  # Fill with white color
+
+    # Draw the image on the screen
+    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+    text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+    window.blit(text_surface, (0, 0))
+    pygame.display.update()
+    # Main game loop
+    while OPEN_TOR:
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                OPEN_TOR = False
+                pygame.quit()
+                # sys.exit()
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()  # Get the current mouse position
+                # print(mouse_pos)
+                # if 24 <= mouse_pos[0] <= 1052 and 330 <= mouse_pos[1] <= 370:
+                #     text = "Hello, World!"  # Replace with your desired text
+                #     text_render = font.render(text, True, (0, 0, 255))  # Render the text with red color
+                #
+                #     # Blit text onto the image
+                #     window.blit(text_render, (24, 353))  # Place the text at position (100, 100) on the image
+                #     # print("Clicked on the specified region of the image")
+                #     # Update the display
+                #     pygame.display.update()
+                if input_rect.collidepoint(event.pos):
+                    # Toggle the active flag
+                    # print("Clicked on the specified region of the image")
+                    active = not active
+                else:
+                    active = False
+                    # Change the input box color accordingly
+                color = color_active if active else color_inactive
+            elif event.type == pygame.KEYDOWN:
+                # If the input box is active, handle keyboard input
+                if active:
+                    if event.key == pygame.K_RETURN:
+                        window.fill((255, 255, 255))  # Fill with white color
+
+                        # Draw the image on the screen
+                        window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                        text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True,
+                                                             (255, 255, 255))
+                        window.blit(text_surface, (0, 0))
+                        if Way_of_the_packet is None:
+                            # If Enter is pressed, print the input text and clear it
+                            print(f"{input_text} + {type(input_text)}")
+                            DATA_FROM_OPENING_SCREEN = input_text
+                            input_text = ""
+                            not_enough = check_user_info(client_socket_udp, client_socket_tcp)
+                            if not_enough == False:
+                                Way_of_the_packet = None
+                                # window.fill((255, 255, 255))  # Fill with white color
+                                #
+                                # # Draw the image on the screen
+                                # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                                text = "you don't have enough computers using Tor. you need at least 1!"  # Replace with your desired text
+                                text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                                # Blit text onto the image
+                                window.blit(text_render,
+                                            (240, 375))  # Place the text at position (100, 100) on the image
+                                # print("Clicked on the specified region of the image")
+                                # Update the display
+                                pygame.display.update()
+                            else:
+                                Start_time = time.time()
+                        else:
+                            # window.fill((255, 255, 255))  # Fill with white color
+                            #
+                            # # Draw the image on the screen
+                            # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                            text = "wait until you get answer from your previous search!"  # Replace with your desired text
+                            text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                            # Blit text onto the image
+                            window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
+                            # print("Clicked on the specified region of the image")
+                            # Update the display
+                            pygame.display.update()
+                    elif event.key == pygame.K_BACKSPACE:
+                        # If Backspace is pressed, remove the last character from the input text
+                        input_text = input_text[:-1]
+                    else:
+                        # Append the pressed key to the input text
+                        input_text += event.unicode
+        # Check if the input text or active state has changed
+        if input_text != prev_text or active != prev_active:
+            # Update the previous text and active state
+            prev_text = input_text
+            prev_active = active
+
+            # Render the input box
+            pygame.draw.rect(window, color, input_rect)
+            text_surface = font.render(input_text, True, (0, 0, 255))
+            window.blit(text_surface, (input_rect.x, input_rect.y + 24))
+            # Update the display
+            pygame.display.update()
+        if URL_TOO_BIG is not None:
+            window.fill((255, 255, 255))  # Fill with white color
+
+            # Draw the image on the screen
+            window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+            text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+            window.blit(text_surface, (0, 0))
+            text = URL_TOO_BIG
+            URL_TOO_BIG = None
+            text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+            # Blit text onto the image
+            window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
+            # print("Clicked on the specified region of the image")
+            # Update the display
+            pygame.display.update()
+        if prev_numbers_of_nodes != len(AVAILABLE_BOTS):
+            window.fill((255, 255, 255))  # Fill with white color
+
+            # Draw the image on the screen
+            window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+            prev_numbers_of_nodes = len(AVAILABLE_BOTS)
+            text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+            window.blit(text_surface, (0, 0))
+            # Update the display
+            pygame.display.update()
+        if Start_time is not None:
+            if time.time() - Start_time >= 60:
+                window.fill((255, 255, 255))  # Fill with white color
+
+                # Draw the image on the screen
+                window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+                window.blit(text_surface, (0, 0))
+                text = "60 seconds have passed. try to search something else"
+                text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                # Blit text onto the image
+                window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
+                # print("Clicked on the specified region of the image")
+                # Update the display
+                pygame.display.update()
+                Start_time = None
+                Way_of_the_packet = None
+    pygame.quit()
 
 
 if __name__ == "__main__":

@@ -2,8 +2,14 @@
 import os
 import re
 import subprocess
+import sys
 import traceback
 
+import pygame
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import webbrowser
 import requests
 
 """""""""""""""""""""""""""""""""THE PROTOCOL FOR THE PACKETS"""""""""""""""""""""""
@@ -38,8 +44,6 @@ from cryptography.hazmat.primitives.asymmetric.padding import OAEP, PKCS1v15, MG
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
 
-
-
 DATA_FROM_UDP_HOLE_PUNCHING = None
 Port_for_bot = None
 Tor_opening_packets = 'Tor\r\n'
@@ -57,6 +61,9 @@ Alice_rsa_private_key, Alice_rsa_public_key = None, None
 Alice_signature = None
 Shared_key_with_server = None  # (encryptor, decryptor, padder, unpadder)
 My_id = None
+OPEN_TOR = True
+SERVER_APPROVED = False
+NO_AVAILABLE_SERVES = False
 # the key is the mac of the main client. mac: cipher object
 CIPHERS_FOR_MAIN_CLIENTS = {}
 Iv_with_server = None
@@ -250,7 +257,7 @@ def verify_packets_from_server(client_socket_tcp, client_socket_udp):
     """
     try:
         global PACKETS_TO_HANDLE_QUEUE
-        while True:
+        while OPEN_TOR:
             if len(PACKETS_TO_HANDLE_QUEUE) < 1:
                 continue
             payload = PACKETS_TO_HANDLE_QUEUE.popleft()
@@ -291,13 +298,15 @@ def udp_punch_hole(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, 
             i += 1
         data_from_hole_punch = Thread_holder[id_to_thread][0]
         del Thread_holder[id_to_thread]
-        verify_packets_from_bots(client_socket_udp, (ipv4_for_punch_hole, port_for_punch_hole), data_from_hole_punch, cipher)
+        verify_packets_from_bots(client_socket_udp, (ipv4_for_punch_hole, port_for_punch_hole), data_from_hole_punch,
+                                 cipher)
         # PACKETS_TO_HANDLE_QUEUE.append(packet1)
     except Exception as e:
         traceback.print_exc()
 
 
-def udp_punch_hole_that_i_started(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher, packet_to_send, id_to_thread):
+def udp_punch_hole_that_i_started(ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher, packet_to_send,
+                                  id_to_thread):
     """
     creating udp punch_hole
     :param ipv4_for_punch_hole:
@@ -309,14 +318,15 @@ def udp_punch_hole_that_i_started(ipv4_for_punch_hole, port_for_punch_hole, clie
     try:
         i = 1
         # data_from_hole_punch = None
-        print(f'started to do udp punch hole i started and the key is: {id_to_thread} and the thread holder is: {Thread_holder}')
+        print(
+            f'started to do udp punch hole i started and the key is: {id_to_thread} and the thread holder is: {Thread_holder}')
         while Thread_holder[id_to_thread][0] is None:
-            #print('got in sending')
+            # print('got in sending')
             client_socket_udp.sendto(packet_to_send, (ipv4_for_punch_hole, port_for_punch_hole))
             Thread_holder[id_to_thread][1] += 1
             print(f'sent: {i} to {(ipv4_for_punch_hole, port_for_punch_hole)}')
             i += 1
-        #data_from_hole_punch = Thread_holder[id_to_thread]
+        # data_from_hole_punch = Thread_holder[id_to_thread]
         del Thread_holder[id_to_thread]
         # verify_packets_from_bots(client_socket_udp, (ipv4_for_punch_hole, port_for_punch_hole), data_from_hole_punch, cipher)
         # PACKETS_TO_HANDLE_QUEUE.append(packet1)
@@ -343,7 +353,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
     :param client_socket_udp:
     :return:
     """
-    global executor, PORT_OF_UDP_SERVER, Tor_opening_packets, Alice_dh_public_key, Shared_key_with_server, Alice_rsa_private_key, My_id, Alice_dh_private_key, Iv_with_server, Packets_to_the_internet, My_id, CIPHERS_FOR_MAIN_CLIENTS, Thread_holder
+    global executor, PORT_OF_UDP_SERVER, Tor_opening_packets, Alice_dh_public_key, Shared_key_with_server, Alice_rsa_private_key, My_id, Alice_dh_private_key, Iv_with_server, Packets_to_the_internet, My_id, CIPHERS_FOR_MAIN_CLIENTS, Thread_holder, SERVER_APPROVED
     reply_tor = Tor_opening_packets
     is_bytes = False
     have_the_id = None
@@ -414,6 +424,18 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
             # -------------
 
             # -------------
+            if line_parts[0] == 'same_network:':
+                ipv4_to_send_port = line_parts[1].split(',')
+                ipv4_to_send = ipv4_to_send_port[1]
+                port_to_send = ipv4_to_send_port[2]
+                id_for_packet = ipv4_to_send_port[0]
+                mac_of_main = Packets_to_the_internet[id_for_packet][-1][1]
+                packet_to_send = f'{mac_of_main}do_decrypt'.encode('utf-8') + \
+                                 Packets_to_the_internet[id_for_packet][-1][0]
+                client_socket_udp.sendto(packet_to_send, (ipv4_to_send, int(port_to_send)))
+            # -------------
+
+            # -------------
             # [mac]?[(ipv4,port)] server to client Node and main
             if line_parts[0] == 'server_notify_bot_for_second_stage_of_udp_hole_punching:':
                 # send to the server something so he will see your public ip
@@ -437,7 +459,8 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                     key_to_thread = have_the_id
                     have_the_id = None
                 # print('did server_notify_bot_for_second_stage_of_udp_hole_punching')
-                executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher, key_to_thread)
+                executor.submit(udp_punch_hole, ipv4_for_punch_hole, port_for_punch_hole, client_socket_udp, cipher,
+                                key_to_thread)
                 # put in your dictionary the mac as key and his ipv4 and port
             # -------------
 
@@ -508,6 +531,18 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
                                 backend=default_backend())
                 CIPHERS_FOR_MAIN_CLIENTS[mac_of_new_client] = cipher
                 print(f'new main_client connected to server: {CIPHERS_FOR_MAIN_CLIENTS}')
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'main_disconnect:':
+                print(f'main disconnect: {line_parts[1]}')
+                del CIPHERS_FOR_MAIN_CLIENTS[line_parts[1]]
+            # -------------
+
+            # -------------
+            if line_parts[0] == 'approved:':
+                print('got apprived')
+                SERVER_APPROVED = True
     except Exception as e:
         traceback.print_exc()
 
@@ -543,14 +578,75 @@ def move_the_packet_forward():
     pass
 
 
+def is_driver_active(driver):
+    try:
+        # Check if the driver is still active by getting the current URL
+        driver.current_url
+        return True
+    except:
+        return False
+
+
+def search_google(query):
+    # url = f"https://www.google.com/search?q={query}"
+    # headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"}
+    # response = requests.get(url, headers=headers)
+    # print("Response status code:", response.status_code)  # Debugging output
+    # if response.status_code == 200:
+    #     soup = BeautifulSoup(response.text, "html.parser")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(options=chrome_options)  # You need to have chromedriver installed and in your PATH
+
+    # Load the webpage
+    driver.get(f"https://www.google.com/search?q={query}")  # Replace 'http://example.com' with your desired URL
+    html_content = driver.page_source
+    return html_content
+    # Wait for the page to fully render (adjust the sleep duration as needed)
+    # time.sleep(15)  # Adjust this time according to your webpage's loading time
+    # while is_driver_active(driver):
+    #     pass
+
+
+def sending_get_request(url):
+    try:
+        # Specify the target URL
+        # url = "http://guthib.com"
+
+        # Send a GET request to the URL
+        response = requests.get(url)
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            print("Request successful!")
+            print("Response content:")
+            # print(type(response.text))  # Print the response content
+            #         # show_html_in_chrome(response.text)
+            return True, response.text
+        else:
+            print("Request failed with status code:", response.status_code)
+            return [False]
+    except:
+        return [False]
+
+
 def create_the_packet_and_sending(data_to_internet):
     """
     creating the packet like it came from me and sending it to google
     :return:
     """
-    data_from_internet = b'got the data from the internet'
-    print('sent data to internet')
-    return data_from_internet
+    try:
+        # print(data_to_internet)
+        # data_from_internet = search_google(data_to_internet)
+        print(f'{data_to_internet} and {type(data_to_internet)}')
+        data_from_internet = sending_get_request(data_to_internet)
+        if data_from_internet[0]:
+            print('sent data to internet')
+            return True, data_from_internet[1].encode('utf-8')
+        else:
+            return [False]
+    except:
+        traceback.print_exc()
+    # return b'got data from the internet'
 
 
 def making_sure_the_thread_stopped(ciphertext, client_socket_udp, key_to_thread):
@@ -598,11 +694,26 @@ def handle_packets_from_bots(raw_packet, client_socket_udp, punch_hole_address, 
                 if b'buda_end' in payload:
                     data_to_send = payload.split(b'buda_end')[1]
                     who_started_the_packet = raw_packet.split('first_person')[1]
-                    answer_from_google = create_the_packet_and_sending(data_to_send)
-                    ciphertext = encrypt_bot(answer_from_google, CIPHERS_FOR_MAIN_CLIENTS[who_started_the_packet])
-                    answer_from_google = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {id_for_packet}\r\n'.encode('utf-8') + 'packet_on__the_way_back: answer_from_google'.encode('utf-8') + ciphertext
+                    answer_from_google = create_the_packet_and_sending(data_to_send.decode('utf-8'))
+                    if answer_from_google[0]:
+                        answer_from_google1 = answer_from_google[1]
+                    else:
+                        answer_from_google1 = b'false'
+                    ciphertext = encrypt_bot(answer_from_google1, CIPHERS_FOR_MAIN_CLIENTS[who_started_the_packet])
+                    answer_from_google = Tor_opening_packets.encode(
+                        'utf-8') + f'id_of_packet: {id_for_packet}\r\n'.encode(
+                        'utf-8') + 'packet_on__the_way_back: answer_from_google'.encode('utf-8') + ciphertext
+                    ciphertext = encrypt_bot(b'false', CIPHERS_FOR_MAIN_CLIENTS[who_started_the_packet])
+                    answer_from_google1 = Tor_opening_packets.encode(
+                        'utf-8') + f'id_of_packet: {id_for_packet}\r\n'.encode(
+                        'utf-8') + 'packet_on__the_way_back: answer_from_google'.encode('utf-8') + ciphertext
                     # the punchole is still alive so i can send the packet direct to the person
-                    client_socket_udp.sendto(answer_from_google, punch_hole_address)
+                    # byte_size = sys.getsizeof(answer_from_google)
+                    # print(byte_size)
+                    try:
+                        client_socket_udp.sendto(answer_from_google, punch_hole_address)
+                    except:
+                        client_socket_udp.sendto(answer_from_google1, punch_hole_address)
                 elif b'finished' in payload:
                     data_to_send = payload.split(b'finished')
                     two_computers = data_to_send[0].split(b'start')[1].decode('utf-8')
@@ -611,9 +722,11 @@ def handle_packets_from_bots(raw_packet, client_socket_udp, punch_hole_address, 
                     who_to_send = two_computers[1]
                     # the part of the packet i am about to move forward
                     if id_for_packet in Packets_to_the_internet:
-                        Packets_to_the_internet[id_for_packet].append((data_to_send[1], who_started_the_packet, punch_hole_address))
+                        Packets_to_the_internet[id_for_packet].append(
+                            (data_to_send[1], who_started_the_packet, punch_hole_address))
                     else:
-                        Packets_to_the_internet[id_for_packet] = [(data_to_send[1], who_started_the_packet, punch_hole_address)]
+                        Packets_to_the_internet[id_for_packet] = [
+                            (data_to_send[1], who_started_the_packet, punch_hole_address)]
                     replay_tor += f'person_started_tor: {who_started_the_packet}\r\nid_of_packet: {id_for_packet}\r\nstart_first_stage_udp_hole_punching: {My_id},{who_to_send}'
                     # print(f'what i am sending: {replay_tor}')
 
@@ -631,10 +744,11 @@ def handle_packets_from_bots(raw_packet, client_socket_udp, punch_hole_address, 
             if line_parts[0] == 'packet_on__the_way_back:':
                 data_from_google = payload.split(b'answer_from_google')[1]
                 mac_of_main_client = Packets_to_the_internet[id_for_packet][-1][1]
-                #print(Packets_to_the_internet)
+                # print(Packets_to_the_internet)
                 cipher = CIPHERS_FOR_MAIN_CLIENTS[mac_of_main_client]
                 ciphertext = encrypt_bot(data_from_google, cipher)
-                answer_from_google = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {id_for_packet}\r\n'.encode('utf-8') + 'packet_on__the_way_back: answer_from_google'.encode('utf-8') + ciphertext
+                answer_from_google = Tor_opening_packets.encode('utf-8') + f'id_of_packet: {id_for_packet}\r\n'.encode(
+                    'utf-8') + 'packet_on__the_way_back: answer_from_google'.encode('utf-8') + ciphertext
                 # the punchole is still alive so i can send the packet direct to the person
                 client_socket_udp.sendto(answer_from_google, Packets_to_the_internet[id_for_packet][-1][2])
                 del Packets_to_the_internet[id_for_packet][-1]
@@ -651,11 +765,16 @@ def verify_packets_from_bots(client_socket_udp, punch_hole_address, payload, cip
     :param cipher: 
     :return: 
     """
+    global CIPHERS_FOR_MAIN_CLIENTS
     try:
         if b'answer_from_google' in payload:
             pass
         elif b'do udp punch hole' in payload:
             return
+        elif b'do_decrypt' in payload:
+            payload1 = payload.split(b'do_decrypt')
+            payload = payload1[1]
+            payload = decrypt_bot(payload, CIPHERS_FOR_MAIN_CLIENTS[payload1[0].decode('utf-8')])
         else:
             payload = decrypt_bot(payload, cipher)
         buda_end = False
@@ -684,7 +803,7 @@ def checking_if_got_packets_from_bots(client_socket_udp):
     """
     try:
         global DATA_FROM_UDP_HOLE_PUNCHING, PACKETS_TO_HANDLE_QUEUE_FOR_BOTS, Thread_holder
-        while True:
+        while OPEN_TOR:
             if len(PACKETS_TO_HANDLE_QUEUE_FOR_BOTS) < 1:
                 continue
             payload_address = PACKETS_TO_HANDLE_QUEUE_FOR_BOTS.popleft()
@@ -696,11 +815,11 @@ def checking_if_got_packets_from_bots(client_socket_udp):
                 if id_payload[0].decode('utf-8') in Thread_holder:
                     if Thread_holder[id_payload[0].decode('utf-8')][1] > 0:
                         Thread_holder[id_payload[0].decode('utf-8')][0] = id_payload[1]
-                #print(f'closed the thread and his key was: {id_payload[0]}')
+                # print(f'closed the thread and his key was: {id_payload[0]}')
             elif b'do udp punch hole' in payload:
                 id_payload = payload.split(b'do')
                 if id_payload[0].decode('utf-8') in Thread_holder:
-                    #print('has the key in ')
+                    # print('has the key in ')
                     if Thread_holder[id_payload[0].decode('utf-8')][1] > 0:
                         Thread_holder[id_payload[0].decode('utf-8')][0] = id_payload[1]
             else:
@@ -782,7 +901,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
     """
     # here he will open the json file and will pick up randomly a computer for ipv6
     # when i will have the db i will change the for
-    global IPV4_OF_SERVER, IPV6_OF_SERVER, DATA_OF_SERVERS
+    global IPV4_OF_SERVER, IPV6_OF_SERVER, DATA_OF_SERVERS, NO_AVAILABLE_SERVES
     for i in range(1, 2):
         try:
             ipv6 = select_ipv6_server()
@@ -808,6 +927,7 @@ def setting_client_socket_for_server_ipv6_or_ipv4():
             print('server is not available. trying another one.')
             del avilable_serves[index_if_not_working]
     if a == 0:
+        NO_AVAILABLE_SERVES = True
         print('there is no available server right now, please try later')
     else:
         print(f"connected to : {IPV4_OF_SERVER}")
@@ -827,7 +947,7 @@ def setting_client_socket_for_bots():
         global Port_for_bot
         a = 0
         client_udp_socket = socket(AF_INET, SOCK_DGRAM)
-        client_udp_socket.settimeout(0.2)
+        client_udp_socket.settimeout(5)
         # bind do !!!!!!!!!!!!!!!
         while a == 0:
             try:
@@ -903,7 +1023,7 @@ def notify_mac_to_server(client_socket_tcp):
         packet_to_send = Tor_opening_packets
         My_id = '876'
         # packet_to_send += f'new_client_to_server: {mac_address},{get_public_ip()},{Port_for_bot}\r\n'
-        packet_to_send += f'new_client_to_server_node: {My_id},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot}\r\n'
+        packet_to_send += f'new_client_to_server_node: {My_id},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot},{str(get_subnet_mask())}\r\n'
         print(f'the packet i am sending before first connected: {packet_to_send}')
         packet_to_send = sending_the_keys_for_security(packet_to_send)
         # print(f" how keys look : {packet_to_send.encode('utf-8')}")
@@ -928,45 +1048,133 @@ def listening_to_udp(client_socket_udp):
     :param client_socket_udp:
     :return:
     """
-    global PACKETS_TO_HANDLE_QUEUE_FOR_BOTS
+    global PACKETS_TO_HANDLE_QUEUE_FOR_BOTS, OPEN_TOR
     try:
-        while True:
+        while OPEN_TOR:
             try:
-                response_from_bots, address = client_socket_udp.recvfrom(16384)
+                response_from_bots, address = client_socket_udp.recvfrom(40000)
             except socket_timeout:
                 continue
-            #print(f'got anything from udp: {response_from_bots}')
+            # print(f'got anything from udp: {response_from_bots}')
             PACKETS_TO_HANDLE_QUEUE_FOR_BOTS.append((response_from_bots, address))
     except:
         traceback.print_exc()
 
 
+def opening_screen():
+    global Shared_key_with_server, NO_AVAILABLE_SERVES
+    pygame.init()
+
+    # Set the dimensions of the window
+    WINDOW_WIDTH = 1065
+    WINDOW_HEIGHT = 670
+    font = pygame.font.SysFont(None, 50)
+    font_for_nodes = pygame.font.SysFont(None, 30)
+    # Load the image
+
+    image_path = "graphics_for_last_project/connect_server.png"  # Replace with the path to your image
+    # image_path = "C:/Networks/last_project/graphics_for_last_project/opening_screen_for_last_project.png"
+    image = pygame.image.load(image_path)
+    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("connect_node")
+    window.fill((255, 255, 255))  # Fill with white color
+
+    # Draw the image on the screen
+    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+    pygame.display.update()
+    while Shared_key_with_server is None:
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+        if NO_AVAILABLE_SERVES:
+            window.fill((0, 0, 0))  # Fill with white color
+            text_surface = font.render(f"THERE ARE NO AVAILABLE SERVES AT THE MOMENT", True, (255, 255, 255))
+            window.blit(text_surface, (60, 310))
+            text_surface = font_for_nodes.render(f"PLEASE TRY AGAIN LATER", True,
+                                                 (255, 255, 255))
+            window.blit(text_surface, (350, 400))
+            pygame.display.update()
+    # pygame.quit()
+
+
+def second_screen():
+    global OPEN_TOR, My_id
+    pygame.quit()
+    pygame.init()
+    WINDOW_WIDTH = 1065
+    WINDOW_HEIGHT = 670
+    # Load the image
+
+    font = pygame.font.SysFont(None, 70)
+    font_for_nodes = pygame.font.SysFont(None, 30)
+    # Set up the display
+    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption(f"Node: {My_id}")
+
+    # Clear the screen
+    window.fill((0, 0, 0))  # Fill with BLACK color
+
+    text_surface = font.render(f"YOUR COMPUTER IS PART OF THE TOR", True, (255, 255, 255))
+    window.blit(text_surface, (70, 310))
+    text_surface = font_for_nodes.render(f"IF YOU DON'T WANT TO BE PART OF THE TOR CLOSE THIS WINDOW", True,
+                                         (255, 255, 255))
+    window.blit(text_surface, (180, 400))
+    pygame.display.update()
+    while OPEN_TOR:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                OPEN_TOR = False
+                pygame.quit()
+    pygame.quit()
+
+
 def main():
     try:
-        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, PACKETS_TO_HANDLE_QUEUE_FOR_BOTS
+        global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, PACKETS_TO_HANDLE_QUEUE_FOR_BOTS, OPEN_TOR, SERVER_APPROVED, NO_AVAILABLE_SERVES
+        executor.submit(opening_screen)
         client_socket_tcp = setting_client_socket_for_server_ipv6_or_ipv4()
-        # making keys
-        Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
-        Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
-        print(f'alice rsa public key: {type(serialize_public_key(Alice_rsa_public_key))}')
-        # Alice signs her DH public key
-        print('did keys')
-        # waits_for_server_approve = client_socket_tcp.recv(1024)
-        # notifying the server about my mac
-        select_random_port()
-        # print('selected port')
-        notify_mac_to_server(client_socket_tcp)
-        # print('notified to server')
-        client_socket_udp = setting_client_socket_for_bots()
-        # a thread for listening to udp packets
-        executor.submit(listening_to_udp, client_socket_udp)
-        # a thread for handeling packets from bots
-        executor.submit(checking_if_got_packets_from_bots, client_socket_udp)
-        # a thread for handling the packets
-        executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
-        while True:
-            response_from_server = client_socket_tcp.recv(16384)
-            PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
+        if NO_AVAILABLE_SERVES is False:
+            # making keys
+            Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
+            Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
+            print(f'alice rsa public key: {type(serialize_public_key(Alice_rsa_public_key))}')
+            # Alice signs her DH public key
+            print('did keys')
+            # waits_for_server_approve = client_socket_tcp.recv(1024)
+            # notifying the server about my mac
+            select_random_port()
+            # print('selected port')
+            notify_mac_to_server(client_socket_tcp)
+            client_socket_tcp.settimeout(5)
+            # print('notified to server')
+            client_socket_udp = setting_client_socket_for_bots()
+            # a thread for listening to udp packets
+            executor.submit(second_screen)
+            executor.submit(listening_to_udp, client_socket_udp)
+            # a thread for handeling packets from bots
+            executor.submit(checking_if_got_packets_from_bots, client_socket_udp)
+            # a thread for handling the packets
+            executor.submit(verify_packets_from_server, client_socket_tcp, client_socket_udp)
+            while OPEN_TOR:
+                try:
+                    response_from_server = client_socket_tcp.recv(40000)
+                    PACKETS_TO_HANDLE_QUEUE.append(response_from_server)
+                except socket_timeout:
+                    continue
+            final_message = Tor_opening_packets.encode('utf-8') + f'node_disconnect: {My_id}'.encode('utf-8')
+            ciphertext = encrypt_server(final_message)
+            client_socket_tcp.send(ciphertext)
+            print('sent_final_message')
+            client_socket_tcp.settimeout(None)
+            while SERVER_APPROVED is False:
+                payload = client_socket_tcp.recv(2048)
+                plaint_text = decrypt_server(payload)
+                if tor_filter(plaint_text):
+                    data1 = plaint_text
+                    data_from_packet = data1.decode('utf-8')
+                    # print(data_from_packet)
+                    handle_packets_from_server(data_from_packet, client_socket_tcp, client_socket_udp, plaint_text)
     except Exception as e:
         traceback.print_exc()
 
