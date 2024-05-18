@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 import webbrowser
-
+import pyperclip
 import pygame
 import requests
 import sys
@@ -845,40 +845,53 @@ def listening_to_udp(client_socket_udp):
 
 def opening_screen():
     global Shared_key_with_server, NO_AVAILABLE_SERVES
-    pygame.init()
+    try:
+        pygame.init()
 
-    # Set the dimensions of the window
-    WINDOW_WIDTH = 1065
-    WINDOW_HEIGHT = 670
-    # Load the image
-    font = pygame.font.SysFont(None, 50)
-    font_for_nodes = pygame.font.SysFont(None, 30)
-    image_path = "graphics_for_last_project/connect_server.png"  # Replace with the path to your image
-    # image_path = "C:/Networks/last_project/graphics_for_last_project/opening_screen_for_last_project.png"
-    image = pygame.image.load(image_path)
-    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-    pygame.display.set_caption("connect_main")
-    window.fill((255, 255, 255))  # Fill with white color
+        # Set the dimensions of the window
+        WINDOW_WIDTH = 1065
+        WINDOW_HEIGHT = 670
+        # Load the image
+        font = pygame.font.SysFont(None, 50)
+        font_for_nodes = pygame.font.SysFont(None, 30)
+        # if getattr(sys, 'frozen', False):  # Check if the application is run as a bundle
+        #     base_path = sys._MEIPASS  # PyInstaller creates a temporary directory with the bundled files
+        # else:
+        #     base_path = os.path.dirname(os.path.abspath(__file__))  # Use the directory of the script
+        # image_path = os.path.join(base_path, 'connect_server.png')
+        image_path = "graphics_for_last_project/connect_server.png"
+        # image_path = "C:/Networks/last_project/graphics_for_last_project/opening_screen_for_last_project.png"
+        image = pygame.image.load(image_path)
+        window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        pygame.display.set_caption("connect_main")
+        window.fill((255, 255, 255))  # Fill with white color
 
-    # Draw the image on the screen
-    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-    pygame.display.update()
-    while Shared_key_with_server is None:
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                # sys.exit()
-        if NO_AVAILABLE_SERVES:
-            window.fill((0, 0, 0))  # Fill with white color
-            text_surface = font.render(f"THERE ARE NO AVAILABLE SERVES AT THE MOMENT", True, (255, 255, 255))
-            window.blit(text_surface, (60, 310))
-            text_surface = font_for_nodes.render(f"PLEASE TRY AGAIN LATER", True,
-                                                 (255, 255, 255))
-            window.blit(text_surface, (350, 400))
-            pygame.display.update()
-    # Quit Pygame
-    # pygame.quit()
+        # Draw the image on the screen
+        window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+        pygame.display.update()
+        print('printed the connect')
+        finished_checking_servers = False
+        while Shared_key_with_server is None:
+            # Handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    if finished_checking_servers:
+                        pygame.quit()
+                        break
+                    # sys.exit()
+            if NO_AVAILABLE_SERVES:
+                window.fill((0, 0, 0))  # Fill with white color
+                text_surface = font.render(f"THERE ARE NO AVAILABLE SERVES AT THE MOMENT", True, (255, 255, 255))
+                window.blit(text_surface, (60, 310))
+                text_surface = font_for_nodes.render(f"PLEASE TRY AGAIN LATER", True,
+                                                     (255, 255, 255))
+                window.blit(text_surface, (350, 400))
+                pygame.display.update()
+                finished_checking_servers = True
+        # Quit Pygame
+        # pygame.quit()
+    except Exception as e:
+        traceback.print_exc()
 
 
 def main():
@@ -944,178 +957,192 @@ def main():
 
 def second_screen(client_socket_udp, client_socket_tcp):
     global DATA_FROM_OPENING_SCREEN, Way_of_the_packet, URL_TOO_BIG, AVAILABLE_BOTS, Start_time, OPEN_TOR, Mac_address
-    pygame.quit()
-    pygame.init()
-    # Set the dimensions of the window
-    WINDOW_WIDTH = 1065
-    WINDOW_HEIGHT = 670
-    # Load the image
+    try:
+        pygame.quit()
+        pygame.init()
+        # Set the dimensions of the window
+        WINDOW_WIDTH = 1065
+        WINDOW_HEIGHT = 670
+        # Load the image
 
-    image_path = "graphics_for_last_project/opening_screen_for_last_project.png"  # Replace with the path to your image
-    image = pygame.image.load(image_path)
+        # if getattr(sys, 'frozen', False):  # Check if the application is run as a bundle
+        #     base_path = sys._MEIPASS  # PyInstaller creates a temporary directory with the bundled files
+        # else:
+        #     base_path = os.path.dirname(os.path.abspath(__file__))  # Use the directory of the script
+        # image_path = os.path.join(base_path, 'opening_screen_for_last_project.png')
+        image_path = "graphics_for_last_project/opening_screen_for_last_project.png"
+        image = pygame.image.load(image_path)
 
-    font = pygame.font.SysFont(None, 30)
-    font_for_nodes = pygame.font.SysFont(None, 50)
-    # Set up the display
-    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-    pygame.display.set_caption(f"Main: {Mac_address}")
+        font = pygame.font.SysFont(None, 30)
+        font_for_nodes = pygame.font.SysFont(None, 50)
+        # Set up the display
+        window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        pygame.display.set_caption(f"Main: {Mac_address}")
 
-    input_text = ""
-    prev_text = ""
-    input_rect = pygame.Rect(24, 330, 1028, 44)  # Position and size of the input box
-    color_active = pygame.Color('black')  # Color when active (typing)
-    color_inactive = pygame.Color('white')  # Color when inactive
-    color = color_inactive
-    active = False
-    prev_active = False
-    prev_numbers_of_nodes = len(AVAILABLE_BOTS)
-    # Clear the screen
-    window.fill((255, 255, 255))  # Fill with white color
+        input_text = ""
+        prev_text = ""
+        input_rect = pygame.Rect(24, 330, 1028, 44)  # Position and size of the input box
+        color_active = pygame.Color('black')  # Color when active (typing)
+        color_inactive = pygame.Color('white')  # Color when inactive
+        color = color_inactive
+        active = False
+        prev_active = False
+        prev_numbers_of_nodes = len(AVAILABLE_BOTS)
+        # Clear the screen
+        window.fill((255, 255, 255))  # Fill with white color
 
-    # Draw the image on the screen
-    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-    text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
-    window.blit(text_surface, (0, 0))
-    pygame.display.update()
-    # Main game loop
-    while OPEN_TOR:
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                OPEN_TOR = False
-                pygame.quit()
-                # sys.exit()
+        # Draw the image on the screen
+        window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+        text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+        window.blit(text_surface, (0, 0))
+        pygame.display.update()
+        # Main game loop
+        while OPEN_TOR:
+            # Handle events
+            try:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        OPEN_TOR = False
+                        pygame.quit()
+                        # sys.exit()
 
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()  # Get the current mouse position
-                # print(mouse_pos)
-                # if 24 <= mouse_pos[0] <= 1052 and 330 <= mouse_pos[1] <= 370:
-                #     text = "Hello, World!"  # Replace with your desired text
-                #     text_render = font.render(text, True, (0, 0, 255))  # Render the text with red color
-                #
-                #     # Blit text onto the image
-                #     window.blit(text_render, (24, 353))  # Place the text at position (100, 100) on the image
-                #     # print("Clicked on the specified region of the image")
-                #     # Update the display
-                #     pygame.display.update()
-                if input_rect.collidepoint(event.pos):
-                    # Toggle the active flag
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        mouse_pos = pygame.mouse.get_pos()  # Get the current mouse position
+                        # print(mouse_pos)
+                        # if 24 <= mouse_pos[0] <= 1052 and 330 <= mouse_pos[1] <= 370:
+                        #     text = "Hello, World!"  # Replace with your desired text
+                        #     text_render = font.render(text, True, (0, 0, 255))  # Render the text with red color
+                        #
+                        #     # Blit text onto the image
+                        #     window.blit(text_render, (24, 353))  # Place the text at position (100, 100) on the image
+                        #     # print("Clicked on the specified region of the image")
+                        #     # Update the display
+                        #     pygame.display.update()
+                        if input_rect.collidepoint(event.pos):
+                            # Toggle the active flag
+                            # print("Clicked on the specified region of the image")
+                            active = not active
+                        else:
+                            active = False
+                            # Change the input box color accordingly
+                        color = color_active if active else color_inactive
+                    elif event.type == pygame.KEYDOWN:
+                        # If the input box is active, handle keyboard input
+                        if active:
+                            if event.key == pygame.K_v and pygame.key.get_mods() & pygame.KMOD_CTRL:
+                                # Check if Control-V is pressed
+                                input_text += pyperclip.paste()
+                            elif event.key == pygame.K_RETURN:
+                                window.fill((255, 255, 255))  # Fill with white color
+
+                                # Draw the image on the screen
+                                window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                                text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True,
+                                                                     (255, 255, 255))
+                                window.blit(text_surface, (0, 0))
+                                if Way_of_the_packet is None:
+                                    # If Enter is pressed, print the input text and clear it
+                                    print(f"{input_text} + {type(input_text)}")
+                                    DATA_FROM_OPENING_SCREEN = input_text
+                                    input_text = ""
+                                    not_enough = check_user_info(client_socket_udp, client_socket_tcp)
+                                    if not_enough == False:
+                                        Way_of_the_packet = None
+                                        # window.fill((255, 255, 255))  # Fill with white color
+                                        #
+                                        # # Draw the image on the screen
+                                        # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                                        text = "you don't have enough computers using Tor. you need at least 1!"  # Replace with your desired text
+                                        text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                                        # Blit text onto the image
+                                        window.blit(text_render,
+                                                    (240, 375))  # Place the text at position (100, 100) on the image
+                                        # print("Clicked on the specified region of the image")
+                                        # Update the display
+                                        pygame.display.update()
+                                    else:
+                                        Start_time = time.time()
+                                else:
+                                    # window.fill((255, 255, 255))  # Fill with white color
+                                    #
+                                    # # Draw the image on the screen
+                                    # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                                    text = "wait until you get answer from your previous search!"  # Replace with your desired text
+                                    text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                                    # Blit text onto the image
+                                    window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
+                                    # print("Clicked on the specified region of the image")
+                                    # Update the display
+                                    pygame.display.update()
+                            elif event.key == pygame.K_BACKSPACE:
+                                # If Backspace is pressed, remove the last character from the input text
+                                input_text = input_text[:-1]
+                            else:
+                                # Append the pressed key to the input text
+                                input_text += event.unicode
+                # Check if the input text or active state has changed
+                if input_text != prev_text or active != prev_active:
+                    # Update the previous text and active state
+                    prev_text = input_text
+                    prev_active = active
+
+                    # Render the input box
+                    pygame.draw.rect(window, color, input_rect)
+                    text_surface = font.render(input_text, True, (0, 0, 255))
+                    window.blit(text_surface, (input_rect.x, input_rect.y + 24))
+                    # Update the display
+                    pygame.display.update()
+                if URL_TOO_BIG is not None:
+                    window.fill((255, 255, 255))  # Fill with white color
+
+                    # Draw the image on the screen
+                    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                    text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+                    window.blit(text_surface, (0, 0))
+                    text = URL_TOO_BIG
+                    URL_TOO_BIG = None
+                    text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+
+                    # Blit text onto the image
+                    window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
                     # print("Clicked on the specified region of the image")
-                    active = not active
-                else:
-                    active = False
-                    # Change the input box color accordingly
-                color = color_active if active else color_inactive
-            elif event.type == pygame.KEYDOWN:
-                # If the input box is active, handle keyboard input
-                if active:
-                    if event.key == pygame.K_RETURN:
+                    # Update the display
+                    pygame.display.update()
+                if prev_numbers_of_nodes != len(AVAILABLE_BOTS):
+                    window.fill((255, 255, 255))  # Fill with white color
+
+                    # Draw the image on the screen
+                    window.blit(image, (0, 0))  # Draw the image at position (0, 0)
+                    prev_numbers_of_nodes = len(AVAILABLE_BOTS)
+                    text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
+                    window.blit(text_surface, (0, 0))
+                    # Update the display
+                    pygame.display.update()
+                if Start_time is not None:
+                    if time.time() - Start_time >= 60:
                         window.fill((255, 255, 255))  # Fill with white color
 
                         # Draw the image on the screen
                         window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-                        text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True,
-                                                             (255, 255, 255))
+                        text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
                         window.blit(text_surface, (0, 0))
-                        if Way_of_the_packet is None:
-                            # If Enter is pressed, print the input text and clear it
-                            print(f"{input_text} + {type(input_text)}")
-                            DATA_FROM_OPENING_SCREEN = input_text
-                            input_text = ""
-                            not_enough = check_user_info(client_socket_udp, client_socket_tcp)
-                            if not_enough == False:
-                                Way_of_the_packet = None
-                                # window.fill((255, 255, 255))  # Fill with white color
-                                #
-                                # # Draw the image on the screen
-                                # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-                                text = "you don't have enough computers using Tor. you need at least 1!"  # Replace with your desired text
-                                text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
+                        text = "60 seconds have passed. try to search something else"
+                        text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
 
-                                # Blit text onto the image
-                                window.blit(text_render,
-                                            (240, 375))  # Place the text at position (100, 100) on the image
-                                # print("Clicked on the specified region of the image")
-                                # Update the display
-                                pygame.display.update()
-                            else:
-                                Start_time = time.time()
-                        else:
-                            # window.fill((255, 255, 255))  # Fill with white color
-                            #
-                            # # Draw the image on the screen
-                            # window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-                            text = "wait until you get answer from your previous search!"  # Replace with your desired text
-                            text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
-
-                            # Blit text onto the image
-                            window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
-                            # print("Clicked on the specified region of the image")
-                            # Update the display
-                            pygame.display.update()
-                    elif event.key == pygame.K_BACKSPACE:
-                        # If Backspace is pressed, remove the last character from the input text
-                        input_text = input_text[:-1]
-                    else:
-                        # Append the pressed key to the input text
-                        input_text += event.unicode
-        # Check if the input text or active state has changed
-        if input_text != prev_text or active != prev_active:
-            # Update the previous text and active state
-            prev_text = input_text
-            prev_active = active
-
-            # Render the input box
-            pygame.draw.rect(window, color, input_rect)
-            text_surface = font.render(input_text, True, (0, 0, 255))
-            window.blit(text_surface, (input_rect.x, input_rect.y + 24))
-            # Update the display
-            pygame.display.update()
-        if URL_TOO_BIG is not None:
-            window.fill((255, 255, 255))  # Fill with white color
-
-            # Draw the image on the screen
-            window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-            text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
-            window.blit(text_surface, (0, 0))
-            text = URL_TOO_BIG
-            URL_TOO_BIG = None
-            text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
-
-            # Blit text onto the image
-            window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
-            # print("Clicked on the specified region of the image")
-            # Update the display
-            pygame.display.update()
-        if prev_numbers_of_nodes != len(AVAILABLE_BOTS):
-            window.fill((255, 255, 255))  # Fill with white color
-
-            # Draw the image on the screen
-            window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-            prev_numbers_of_nodes = len(AVAILABLE_BOTS)
-            text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
-            window.blit(text_surface, (0, 0))
-            # Update the display
-            pygame.display.update()
-        if Start_time is not None:
-            if time.time() - Start_time >= 60:
-                window.fill((255, 255, 255))  # Fill with white color
-
-                # Draw the image on the screen
-                window.blit(image, (0, 0))  # Draw the image at position (0, 0)
-                text_surface = font_for_nodes.render(f"NUMBER_OF_NODES: {prev_numbers_of_nodes}", True, (255, 255, 255))
-                window.blit(text_surface, (0, 0))
-                text = "60 seconds have passed. try to search something else"
-                text_render = font.render(text, True, (255, 0, 0))  # Render the text with red color
-
-                # Blit text onto the image
-                window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
-                # print("Clicked on the specified region of the image")
-                # Update the display
-                pygame.display.update()
-                Start_time = None
-                Way_of_the_packet = None
-    pygame.quit()
+                        # Blit text onto the image
+                        window.blit(text_render, (240, 375))  # Place the text at position (100, 100) on the image
+                        # print("Clicked on the specified region of the image")
+                        # Update the display
+                        pygame.display.update()
+                        Start_time = None
+                        Way_of_the_packet = None
+            except:
+                traceback.print_exc()
+        pygame.quit()
+    except:
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

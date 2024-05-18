@@ -161,7 +161,7 @@ def encrypt(plaintext, mac):
     # mac: tuple(str_ipv4, int_port), client_socket, [public_rsa, public_dh, shared_key_with_him:(encryptor, decryptor, padder, unpadder)]
     # (encryptor, decryptor, padder, unpadder)
     if mac in MY_DATA_FOR_CLIENTS_NODES:
-        print('encrypted to node')
+        # print('encrypted to node')
         cipher = MY_DATA_FOR_CLIENTS_NODES[mac][2][2]
     else:
         cipher = MY_DATA_FOR_MAIN_CLIENTS[mac][2][2]
@@ -280,7 +280,7 @@ def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, po
                 # packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({data_for_person[0]},{data_for_person[2]})'
             # if not
             else:
-                print(' not in the same network')
+                # print(' not in the same network')
                 packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({ip},{port})'
         elif mac_of_the_1 in MY_DATA_FOR_CLIENTS_NODES:
             data_for_person = MY_DATA_FOR_CLIENTS_NODES[mac_of_the_1][0]
@@ -293,7 +293,7 @@ def server_notify_bot_for_second_stage_of_udp_hole_punching(mac_of_the_1, ip, po
                 # packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({data_for_person[0]},{data_for_person[2]})'
             # if not
             else:
-                print(' not in the same network')
+                # print(' not in the same network')
                 packet_to_add = f'server_notify_bot_for_second_stage_of_udp_hole_punching: {mac_of_the_1}?({ip},{port})'
         return packet_to_add, same_network
     except Exception as e:
@@ -371,7 +371,8 @@ def notify_a_new_client_for_other_clients(public_dh_of_new, bob_iv, mac_of_the_n
         'utf-8') + bob_iv
     message_to_all = ''
     if mac_of_the_new_client in MY_DATA_FOR_MAIN_CLIENTS:
-        for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
+        dictionary_that_will_not_change_size = MY_DATA_FOR_CLIENTS_NODES
+        for key, value in dictionary_that_will_not_change_size.items():
             # first sending to the other client
             client_socket = value[1]
             cipher_text = encrypt(add_sign, key)
@@ -384,14 +385,15 @@ def notify_a_new_client_for_other_clients(public_dh_of_new, bob_iv, mac_of_the_n
         if add_sign_to_new != b'':
             add_sign_to_new = Tor_opening_packets.encode('utf-8') + add_sign_to_new
             cipher_text = encrypt(add_sign_to_new, mac_of_the_new_client)
-            print(f' notifying new client: {cipher_text}')
+            # print(f' notifying new client: {cipher_text}')
             client_socket_of_new_client.send(cipher_text)
     elif mac_of_the_new_client in MY_DATA_FOR_CLIENTS_NODES:
         message = Tor_opening_packets
         message += f'new_client_to_server_node: {mac_of_the_new_client}\r\nsigh_message_for_computer: goren'
         add_sign = message.encode('utf-8') + serialize_public_key(public_dh_of_new) + 'amit'.encode(
             'utf-8') + bob_iv
-        for key, value in MY_DATA_FOR_MAIN_CLIENTS.items():
+        dictionary_that_will_not_change_size = MY_DATA_FOR_MAIN_CLIENTS
+        for key, value in dictionary_that_will_not_change_size.items():
             # first sending to the other client
             client_socket = value[1]
             cipher_text = encrypt(add_sign, key)
@@ -403,7 +405,7 @@ def notify_a_new_client_for_other_clients(public_dh_of_new, bob_iv, mac_of_the_n
                 'utf-8') + bob_iv + '\r\n'.encode('utf-8')
         if add_sign_to_new != b'':
             add_sign_to_new = Tor_opening_packets.encode('utf-8') + add_sign_to_new
-            print(f' notifying new client: {add_sign_to_new}')
+            # print(f' notifying new client: {add_sign_to_new}')
             cipher_text = encrypt(add_sign_to_new, mac_of_the_new_client)
             client_socket_of_new_client.send(cipher_text)
 
@@ -425,7 +427,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
         lines = raw_packet.split('\r\n')
         while '' in lines:
             lines.remove('')
-        print(f' the data of the incoming packet : {lines}')
+        # print(f' the data of the incoming packet : {lines}')
         for line in lines:
             line_parts = line.split()
             # new_client_to_server: [mac of the new client that connected to you] client Node and main to server and server to client Nodes
@@ -434,7 +436,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 l_parts = line_parts[1].split(',')
                 mac_of_bot = l_parts[0]
                 # (private ip, public ip, port number private), client socket
-                print('new main client')
+                # print('new main client')
                 MY_DATA_FOR_MAIN_CLIENTS[l_parts[0]] = [(l_parts[1], l_parts[2], l_parts[3], str(client_address[1]), l_parts[4]), client_socket]
                 # add this client mac in line_parts[1] to your data base and with his address
                 # sending the client the port for udp
@@ -445,7 +447,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 pass
             # -------------
             if line_parts[0] == 'new_client_to_server_node:':
-                print('new client node')
+                # print('new client node')
                 l_parts = line_parts[1].split(',')
                 # (private ip, public ip, port number private), client socket
                 replay_tor += f'your_id: {Id_for_clients}\r\n'
@@ -467,13 +469,13 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
 
             # -------------
             if line_parts[0] == 'id_of_packet:':
-                print('got in id of packet')
+                # print('got in id of packet')
                 id_to_pass = line_parts[1]
             # -------------
 
             # -------------
             if line_parts[0] == 'person_started_tor:':
-                print('got in id of packet')
+                # print('got in id of packet')
                 person_started_tor = line_parts[1]
             # -------------
 
@@ -488,10 +490,10 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 # the public port and ip of the person that started the punch hole
                 public_port_of_1 = client_address[1]
                 public_ip_of_1 = client_address[0]
-                print(f'the public ip of 1: {public_ip_of_1}. the public port 1: {public_port_of_1}')
+                # print(f'the public ip of 1: {public_ip_of_1}. the public port 1: {public_port_of_1}')
                 # updating the dictionary of the bot
                 if id_to_pass is not None:
-                    print(f'id to pass is not None: {id_to_pass}')
+                    # print(f'id to pass is not None: {id_to_pass}')
                     replay_tor2 += f'person_started_tor: {person_started_tor}\r\nid_of_packet: {id_to_pass}\r\n'
                 replay_tor_and_interntet = server_notify_bot_for_second_stage_of_udp_hole_punching(l_parts[0],
                                                                                                    public_ip_of_1,
@@ -512,14 +514,14 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 else:
                     if l_parts[1] in MY_DATA_FOR_MAIN_CLIENTS:
 
-                        print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
+                        # print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
                         # add_sign = replay_tor2.encode('utf-8') + serialize_public_key(
                         #     MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[0]][2][
                         #                3]
                         ciphertext = encrypt(replay_tor2.encode('utf-8'), l_parts[1])
                         MY_DATA_FOR_MAIN_CLIENTS[l_parts[1]][1].send(ciphertext)
                     elif l_parts[1] in MY_DATA_FOR_CLIENTS_NODES:
-                        print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
+                        # print(f' what i am sending to the second bot in punch hole: {replay_tor2}')
                         # add_sign = replay_tor2.encode('utf-8') + serialize_public_key(
                         #     MY_DATA_FOR_BOTS[l_parts[0]][2][1]) + 'amit'.encode('utf-8') + MY_DATA_FOR_BOTS[l_parts[0]][2][
                         #                3]
@@ -567,10 +569,10 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 where_to_send = MY_DATA_FOR_CLIENTS_NODES[l_parts[0]][1]
                 # notifying the other bot he can start the punch hole
                 where_to_send.send(ciphertext)
-                print(f' what i am sending to the first bot in punch hole: {replay_tor}')
+                # print(f' what i am sending to the first bot in punch hole: {replay_tor}')
                 ciphertext = encrypt(replay_tor.encode('utf-8'), l_parts[1])
                 client_socket.send(ciphertext)
-                print('finished sending each of the bots data')
+                # print('finished sending each of the bots data')
 
             # -------------
 
@@ -588,13 +590,13 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 # sending the clients the server public keys
                 # print(f'the public rsa of bob: {deserialize_public_key(l_parts[1])}')
                 # print(type(deserialize_public_key(l_parts[1])))
-                print(print(f' the public key: {l_parts[1]}'))
+                # print(print(f' the public key: {l_parts[1]}'))
                 packet_to_send, encrypted_key = sending_the_keys_for_security('',
                                                                               deserialize_public_key(l_parts[1]))
                 # Generate a random IV (Initialization Vector)
                 # iv = os.urandom(16)  # 16 bytes IV for AES
                 replay_tor += packet_to_send.encode('utf-8') + encrypted_key
-                print(f"the packet i am sending with sign: {replay_tor}")
+                # print(f"the packet i am sending with sign: {replay_tor}")
                 client_socket.send(replay_tor)
             # -------------
 
@@ -618,7 +620,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                         label=None
                     )
                 )
-                print(f'the id or mack of the person {mac_of_the_person_who_sent_the_packet}')
+                # print(f'the id or mack of the person {mac_of_the_person_who_sent_the_packet}')
                 if mac_of_the_person_who_sent_the_packet in MY_DATA_FOR_MAIN_CLIENTS:
                     MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][
                         1] = serialization.load_pem_public_key(
@@ -636,8 +638,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                         backend=default_backend())
                     MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][2] = cipher
                     MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][3] = bob_iv
-                    print(
-                        f' shared with main client: {MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][2]}')
+                    # print(f' shared with main client: {MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][2]}')
                     notify_a_new_client_for_other_clients(
                         MY_DATA_FOR_MAIN_CLIENTS[mac_of_the_person_who_sent_the_packet][2][1],
                         os.urandom(16), mac_of_the_person_who_sent_the_packet,
@@ -659,8 +660,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                         backend=default_backend())
                     MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][2][2] = cipher
                     MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][2][3] = bob_iv
-                    print(
-                        f' shared with clients Nodes: {MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][2][2]}')
+                    # print(f' shared with clients Nodes: {MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][2][2]}')
                     notify_a_new_client_for_other_clients(
                         MY_DATA_FOR_CLIENTS_NODES[mac_of_the_person_who_sent_the_packet][2][1],
                         os.urandom(16), mac_of_the_person_who_sent_the_packet,
@@ -675,7 +675,7 @@ def handle_packets_from_computers(raw_packet, client_socket, client_address, ser
                 client_socket.send(ciphertext)
                 del MY_DATA_FOR_CLIENTS_NODES[line_parts[1]]
                 del LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket]
-                print('deleted this node')
+                # print('deleted this node')
             # -------------
 
             # -------------
@@ -760,8 +760,7 @@ def handle_packet_from_udp(server_socket_udp):
                     break
             if mac is None:
                 for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
-                    print(
-                        f'the id of the client: {key} the value of the client: {value} and the address of who sent the packet: {client_address}')
+                    # print(f'the id of the client: {key} the value of the client: {value} and the address of who sent the packet: {client_address}')
                     if value[0][0] == client_address[0] and value[0][2] == str(client_address[1]):
                         # so the server and the bot are on the same network
                         mac = key
@@ -832,7 +831,7 @@ def verify_clients(client_socket, client_address, server_socket_udp):
     while client_socket in LIST_OF_QUEUES_FOR_EACH_CLIENT:
         if len(LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket]) < 1:
             continue
-        print('got a packet')
+        # print('got a packet')
         incoming_packet = LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket].popleft()
         if finished_exchanging_keys < 2:
             if tor_filter(incoming_packet):
@@ -854,13 +853,13 @@ def verify_clients(client_socket, client_address, server_socket_udp):
                     mac = key
                     break
             if mac is None:
-                print('trying for node')
+                # print('trying for node')
                 for key, value in MY_DATA_FOR_CLIENTS_NODES.items():
-                    print(f'entered the for: {key},{value} and {client_address}')
+                    # print(f'entered the for: {key},{value} and {client_address}')
                     if value[0][0] == client_address[0] and value[0][3] == str(client_address[1]):
                         # so the server and the bot are on the same network
                         mac = key
-                        print('found key')
+                        # print('found key')
                         break
                     elif value[0][1] == client_address[0]:
                         mac = key
@@ -868,10 +867,10 @@ def verify_clients(client_socket, client_address, server_socket_udp):
             plaint_text = decrypt(incoming_packet, mac)
             if tor_filter(plaint_text):
                 data_from_packet = plaint_text.decode('utf-8')
-        print('calling handle')
+        # print('calling handle')
         handle_packets_from_computers(data_from_packet, client_socket, client_address, server_socket_udp,
                                       incoming_packet, mac)
-    print('no more this client4')
+    # print('no more this client4')
 
 
 def new_clients(client_socket):
@@ -890,7 +889,7 @@ def new_clients(client_socket):
                 LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket].append(incoming_packet)
             except socket_timeout:
                 continue
-        print('no more this client2')
+        # print('no more this client2')
     except Exception as e:
         pass
         # traceback.print_exc()
@@ -901,8 +900,8 @@ def main():
         global executor, Alice_dh_public_key, Alice_rsa_public_key, Alice_dh_private_key, Alice_rsa_private_key, LIST_OF_QUEUES_FOR_EACH_CLIENT
         server_socket_tcp = set_socket_tcp()
         server_socket_udp = set_socket_udp()
-        print(f'your private ip: {get_ipv4_address_private()}')
-        print(f'your public ip: {get_public_ip()}')
+        # print(f'your private ip: {get_ipv4_address_private()}')
+        # print(f'your public ip: {get_public_ip()}')
         # making keys
         Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
         Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
@@ -912,7 +911,8 @@ def main():
         # Alice_rsa_public_key = RSA.import_key(alice_dh_public_bytes)
         # Alice signs her DH public key
         # print(serialize_dh_public_key(Alice_rsa_public_key))
-        print('did keys')
+        # print('did keys')
+        print('the server is running')
         # print(get_subnet_mask())
         # setting a thread which will handle new clients.
         executor.submit(handle_packet_from_udp, server_socket_udp)
@@ -920,11 +920,11 @@ def main():
             try:  # !!
                 server_socket_tcp.listen(1)  # getting incoming packets
                 client_socket, client_address = server_socket_tcp.accept()
-                print(f' the address of the client who connected: {client_address}')
+                # print(f' the address of the client who connected: {client_address}')
                 LIST_OF_QUEUES_FOR_EACH_CLIENT[client_socket] = deque()
                 executor.submit(new_clients, client_socket)
                 executor.submit(verify_clients, client_socket, client_address, server_socket_udp)
-                print('opend thread')
+                # print('opend thread')
                 # PACKETS_TO_HANDLE_QUEUE.append((client_socket, client_address))
             except socket_timeout:
                 continue
@@ -932,7 +932,7 @@ def main():
                 traceback.print_exc()
     except Exception as e:
         traceback.print_exc()
-        print(e)
+        # print(e)
 
 
 if __name__ == "__main__":

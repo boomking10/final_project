@@ -541,7 +541,7 @@ def handle_packets_from_server(raw_packet, client_socket_tcp, client_socket_udp,
 
             # -------------
             if line_parts[0] == 'approved:':
-                print('got apprived')
+                print('got approved')
                 SERVER_APPROVED = True
     except Exception as e:
         traceback.print_exc()
@@ -637,7 +637,7 @@ def create_the_packet_and_sending(data_to_internet):
     try:
         # print(data_to_internet)
         # data_from_internet = search_google(data_to_internet)
-        print(f'{data_to_internet} and {type(data_to_internet)}')
+        # print(f'{data_to_internet} and {type(data_to_internet)}')
         data_from_internet = sending_get_request(data_to_internet)
         if data_from_internet[0]:
             print('sent data to internet')
@@ -661,7 +661,7 @@ def making_sure_the_thread_stopped(ciphertext, client_socket_udp, key_to_thread)
     while True:
         # checking if finished the last thread of the same packet
         if key_to_thread not in Thread_holder:
-            print('last thread finished')
+            # print('last thread finished')
             client_socket_udp.sendto(ciphertext, (IPV4_OF_SERVER, PORT_OF_UDP_SERVER))
             return
 
@@ -677,7 +677,7 @@ def handle_packets_from_bots(raw_packet, client_socket_udp, punch_hole_address, 
         lines = raw_packet.split('\r\n')
         while '' in lines:
             lines.remove('')
-        # print(f' got packet on the way from punch hole and the data: {lines}')
+        print(f' got packet on the way from punch hole and the data: {lines}')
         for line in lines:
             line_parts = line.split()
 
@@ -807,7 +807,7 @@ def checking_if_got_packets_from_bots(client_socket_udp):
             if len(PACKETS_TO_HANDLE_QUEUE_FOR_BOTS) < 1:
                 continue
             payload_address = PACKETS_TO_HANDLE_QUEUE_FOR_BOTS.popleft()
-            print(f'got to the paoload : {payload_address}')
+            # print(f'got to the paoload : {payload_address}')
             payload = payload_address[0]
             address = payload_address[1]
             if b'to_know_which_thread' in payload:
@@ -1024,7 +1024,7 @@ def notify_mac_to_server(client_socket_tcp):
         My_id = '876'
         # packet_to_send += f'new_client_to_server: {mac_address},{get_public_ip()},{Port_for_bot}\r\n'
         packet_to_send += f'new_client_to_server_node: {My_id},{get_ipv4_address_private()},{get_public_ip()},{Port_for_bot},{str(get_subnet_mask())}\r\n'
-        print(f'the packet i am sending before first connected: {packet_to_send}')
+        # print(f'the packet i am sending before first connected: {packet_to_send}')
         packet_to_send = sending_the_keys_for_security(packet_to_send)
         # print(f" how keys look : {packet_to_send.encode('utf-8')}")
         client_socket_tcp.send(packet_to_send.encode('utf-8'))
@@ -1072,7 +1072,12 @@ def opening_screen():
     font_for_nodes = pygame.font.SysFont(None, 30)
     # Load the image
 
-    image_path = "graphics_for_last_project/connect_server.png"  # Replace with the path to your image
+    # if getattr(sys, 'frozen', False):  # Check if the application is run as a bundle
+    #     base_path = sys._MEIPASS  # PyInstaller creates a temporary directory with the bundled files
+    # else:
+    #     base_path = os.path.dirname(os.path.abspath(__file__))  # Use the directory of the script
+    # image_path = os.path.join(base_path, 'connect_server.png')
+    image_path = "graphics_for_last_project/connect_server.png"
     # image_path = "C:/Networks/last_project/graphics_for_last_project/opening_screen_for_last_project.png"
     image = pygame.image.load(image_path)
     window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -1082,11 +1087,14 @@ def opening_screen():
     # Draw the image on the screen
     window.blit(image, (0, 0))  # Draw the image at position (0, 0)
     pygame.display.update()
+    finished_checking_servers = False
     while Shared_key_with_server is None:
         # Handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
+                if finished_checking_servers:
+                    pygame.quit()
+                    break
         if NO_AVAILABLE_SERVES:
             window.fill((0, 0, 0))  # Fill with white color
             text_surface = font.render(f"THERE ARE NO AVAILABLE SERVES AT THE MOMENT", True, (255, 255, 255))
@@ -1095,6 +1103,7 @@ def opening_screen():
                                                  (255, 255, 255))
             window.blit(text_surface, (350, 400))
             pygame.display.update()
+            finished_checking_servers = True
     # pygame.quit()
 
 
@@ -1138,9 +1147,9 @@ def main():
             # making keys
             Alice_dh_private_key, Alice_dh_public_key = generate_dh_key_pair()
             Alice_rsa_private_key, Alice_rsa_public_key = generate_rsa_key_pair()
-            print(f'alice rsa public key: {type(serialize_public_key(Alice_rsa_public_key))}')
+            # print(f'alice rsa public key: {type(serialize_public_key(Alice_rsa_public_key))}')
             # Alice signs her DH public key
-            print('did keys')
+            # print('did keys')
             # waits_for_server_approve = client_socket_tcp.recv(1024)
             # notifying the server about my mac
             select_random_port()
